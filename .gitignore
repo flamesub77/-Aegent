@@ -1,0 +1,16 @@
+.env
+__pycache__/
+.pytest_cache/
+.playwright-mcp/
+mappings/
+
+# 비밀값: .env는 항상 제외 (.env.example만 올린다)
+.env.*
+!.env.example
+
+# 저장소 제외 (보고서, 중복 사본·압축본, 화면 점검 산출물)
+*.docx
+~$*
+files.zip
+미니 프로젝트/
+review/screenshots/
