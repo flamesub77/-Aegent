@@ -11,7 +11,7 @@ from tools.domain import FACTORS, PROP_DECIMALS, PROP_UNIT, STD_COLUMN, factor_l
 ID_TYPES = {"coil_no": "냉연코일번호", "hot_coil_no": "열연코일번호", "slab_no": "슬라브번호", "heat_no": "히트번호"}
 PROCESS_ORDER = ["제강", "연주", "열연", "산세", "냉연", "소둔", "도금", "조질"]
 MIN_BASE = 30
-MATERIAL_PROPS = ["YS", "TS", "EL", "BH", "rbar", "n_value", "dr"]
+MATERIAL_PROPS = ["YS", "TS", "EL", "BH", "rbar", "n_value"]
 
 
 def _robust(s: pd.Series):
@@ -19,7 +19,8 @@ def _robust(s: pd.Series):
     s = s.dropna()
     med = s.median()
     mad = 1.4826 * (s - med).abs().median()
-    return med, (mad if mad > 0 else s.std())
+    # 값 종류가 적은 열(취련 횟수, 두께 단계 등)은 MAD가 0에 가까워 z가 부풀므로 표준편차를 쓴다
+    return med, (mad if mad > 0 and s.nunique() >= 8 else s.std())
 
 
 def parse_ids(text) -> list[str]:
@@ -113,9 +114,14 @@ def _material_rows(coil, base, spec: dict) -> list[dict]:
     return rows
 
 
+CONDITION_FACTORS = {"thk", "width", "hot_thk", "slab_wid"}  # 치수는 양산 비교 조건이라 원인 후보에서 뺀다
+
+
 def _factor_rows(coil, base, family, key_prop, key_diff, grade_row) -> list[dict]:
     rows = []
     for f in A.available_factors(base):
+        if f in CONDITION_FACTORS:
+            continue
         if pd.isna(coil.get(f)) or base[f].notna().sum() < 5:
             continue
         v, (mu, sd) = float(coil[f]), _robust(base[f])

@@ -13,6 +13,7 @@ from tools import narrative as N
 from tools import terms as T
 from tools.datasource import get_source
 from tools.domain import DEFECTS, PROP_LABEL
+from tools.ranking import MODELS
 
 # 순서가 중요하다: 긴 표현·구체적인 표현을 먼저 본다
 GRADE_ALIASES = [
@@ -22,7 +23,6 @@ GRADE_ALIASES = [
 ]
 LINE_ALIASES = [(r"\bcal\b|연속소둔", "CAL"), (r"\bcgl\b|ga\s*재|\bga\b|도금재|용융아연", "CGL_GA")]
 PROP_ALIASES = [
-    (r"평면\s*이방성|δ\s*r|델타\s*r|이어링|delta\s*r|\bdr\b", "dr"),
     (r"r\s*바|r̄|rbar|r\s*bar|평균\s*r|소성\s*이방성|r값|딥\s*드로", "rbar"),
     (r"n\s*값|가공\s*경화|n_value|\bn\s*value", "n_value"),
     (r"항복|\bys\b|\byp\b", "YS"), (r"인장|\bts\b", "TS"), (r"연신|\bel\b", "EL"), (r"소부|\bbh\b", "BH"),
@@ -34,13 +34,14 @@ FACTOR_ALIASES = [
     (r"\bspm\b|조질", "SPM"), (r"라인\s*속도|통판\s*속도", "line_speed"), (r"디스케일", "descale_press"),
     (r"산세\s*속도", "pickle_speed"), (r"염산|hcl", "hcl_conc"), (r"과열도", "superheat"),
 ]
-VIEW_ALIASES = [(r"raw|원본|원천|데이터\s*표|엑셀", "Raw Data"), (r"원인|왜|이유|때문", "원인 분석"),
-                (r"분포|편차|히스토그램|추이", "재질 편차")]
-STYLE_ALIASES = [(r"쉽게|쉬운\s*말|구어체", "easy"), (r"전문가|전공|야금|금속재료", "expert"), (r"통계", "stat")]
+VIEW_ALIASES = [(r"raw|원본|원천|데이터\s*표|엑셀", "데이터"), (r"원인|왜|이유|때문", "공정분석"),
+                (r"분포|편차|히스토그램|추이|현황|생산량|개요", "재질개요")]
+MODEL_ALIASES = [(r"랜덤\s*포레스트|random\s*forest|\brf\b", "rf"), (r"부스팅|gbm|boost", "gbm"),
+                 (r"회귀|lasso|라쏘", "lasso"), (r"상관|spearman", "spearman"), (r"차이\s*크기|효과\s*크기", "effect")]
 ID_WORDS = [(r"열연\s*코일|열연", "hot_coil_no"), (r"슬라브|slab", "slab_no"), (r"히트|heat|차지", "heat_no")]
 
 EXAMPLES = ["5월 CAL 590C 항복강도 원인", "3월 극저 외판 r값", "6월 GA재 파우더링", "C260500123 코일 양산이랑 비교",
-            "산점도를 균열온도로", "전문가 문체로"]
+            "산점도를 소둔온도로", "랜덤포레스트로 원인 순위 봐줘"]
 
 
 def _find(patterns, text):
@@ -102,22 +103,36 @@ def parse_question(text: str, state: dict) -> tuple[dict, list[str]]:
         seen.append(f"원인 인자 {factor}")
     defect = next((d for d in DEFECTS if d in q), None)
     if defect:
-        ch["defect"], ch["view"] = defect, "표면결함"
+        ch["defect"], ch["view"] = defect, "결함분석"
         seen.append(f"결함 {defect}")
     id_type, ids = _ids(q)
     if ids:
-        ch.update(coil_ids=", ".join(ids), id_type=id_type, view="코일 단건 분석")
+        ch.update(coil_ids=", ".join(ids), id_type=id_type, view="코일분석")
         seen.append(f"{L.ID_TYPES[id_type]} {', '.join(ids[:3])}{' 외' if len(ids) > 3 else ''}")
-    style = _find(STYLE_ALIASES, q)
-    if style:
-        ch["style"] = style
-        seen.append(f"문체 {T.STYLES[style]}")
+    model = _find(MODEL_ALIASES, q) if re.search(r"모델|방법|알고리즘|포레스트|부스팅|회귀|상관|lasso|rf|gbm", q, re.I) else None
+    if model:
+        ch["model"] = model
+        seen.append(f"순위 모델 {MODELS[model]}")
+        if "view" not in ch:
+            ch["view"] = "공정분석"
     if "view" not in ch and factor and re.search(r"산점도|x\s*축|추이|인자", q):
-        ch["view"] = "원인 분석"
+        ch["view"] = "공정분석"
     if "view" not in ch:
         view = _find(VIEW_ALIASES, q)
         if view:
             ch["view"] = view
+    # 새 분석 질문(강종·기간을 말함)이면 질문에 없는 조건으로 범위를 좁히지 않는다 (이전 질문의 라인·두께·시편 위치 해제)
+    if "grade" in ch or "start_date" in ch:
+        base = ds.defaults()
+        for key in ("line", "coil_pos", "thk_min", "thk_max", *ds.CODE_FILTERS):
+            if key not in ch and state.get(key, base[key]) != base[key]:
+                ch[key] = base[key]
+    m = re.search(r"(\d(?:\.\d)?)\s*(?:시그마|σ|sigma)", q, re.I)
+    if m:
+        ch["sigma"] = float(m.group(1))
+        seen.append(f"문제 코일 기준 {float(m.group(1)):.1f}σ")
+    if "prop" in ch:  # 질문한 재질을 화면 재질 체크에도
+        ch.setdefault("props", [ch["prop"]])
     if re.search(r"낮|떨어|하락|미달|저하", q):
         ch["side"] = "low"
     elif re.search(r"높|올라|상승|초과", q):
@@ -131,7 +146,7 @@ def answer(question: str, state: dict, on_tool=None):
 
     changes, seen = parse_question(question, state)
     new_state, applied, errors = ds.apply_update(state, changes)
-    style = new_state.get("style", T.DEFAULT_STYLE)
+    style = T.DEFAULT_STYLE
     calls: list[ToolCall] = []
 
     def record(name, args, result):
@@ -145,7 +160,7 @@ def answer(question: str, state: dict, on_tool=None):
     lines = [f"**인식한 조건**: {', '.join(seen)}" if seen else ""]
     args = ds.analysis_args(new_state)
 
-    if new_state.get("view") == "코일 단건 분석" and "coil_ids" in changes:
+    if new_state.get("view") == "코일분석" and "coil_ids" in changes:
         res = record("analyze_coil", {"ids": new_state["coil_ids"], "id_type": new_state["id_type"]},
                      L.compact(L.analyze_coil(new_state["coil_ids"], new_state["id_type"])))
         full = L.analyze_coil(new_state["coil_ids"], new_state["id_type"])
@@ -160,7 +175,7 @@ def answer(question: str, state: dict, on_tool=None):
                 f"{x['label']}({x['direction']}, {x['coils']}/{x['of']})" for x in full["common"]))
         if not full.get("coils") and not full.get("missing"):
             lines.append(res.get("error", "분석할 코일이 없습니다."))
-    elif new_state.get("view") == "표면결함" and "defect" in changes:
+    elif new_state.get("view") == "결함분석" and "defect" in changes:
         grade = changes.get("grade")  # 결함은 강종을 말했을 때만 좁힌다
         r = record("trace_defect", {"defect_type": new_state["defect"], "grade": grade, **{k: args[k] for k in ("line", "start", "end")}},
                    A.defect_trace(new_state["defect"], grade, args["line"], args["start"], args["end"]))
@@ -168,10 +183,12 @@ def answer(question: str, state: dict, on_tool=None):
             lines.append(r["error"])
         else:
             lines.append(_defect_text(r, style))
-    elif changes.keys() - {"style", "factor", "side", "view"} or re.search(r"원인|왜|이유|해석|분석", question):
-        diag = A.diagnose(**args)
+    elif changes.keys() - {"factor", "side", "view"} or re.search(r"원인|왜|이유|해석|분석", question):
+        sub = ds.subset_args(new_state)  # 화면의 두께 구간·시편 위치 필터도 같이 적용
+        diag = A.diagnose(**args, **sub)
         comp = A.compare(args["grade"], new_state["prop"], args["line"], args["start"], args["end"],
-                         side=new_state["side"])
+                         side=new_state["side"], model=new_state.get("model", "effect"),
+                         sigma=new_state.get("sigma", 1.0), **sub)
         record("diagnose_distribution", args, {k: v for k, v in diag.items() if k != "properties"})
         record("compare_groups", {**args, "target_property": new_state["prop"]},
                {k: v for k, v in comp.items() if k not in ("all_factors", "confounders")})
@@ -181,8 +198,7 @@ def answer(question: str, state: dict, on_tool=None):
             lines.append("**조치**\n" + "\n".join(f"- {a}" for a in ins["actions"]))
         lines += [f"⚠ {w}" for w in ins["warnings"]]
     elif changes:
-        lines.append(f"화면을 바꿨어요: {', '.join(f'{k}={v}' for k, v in applied.items())}"
-                     if style == "easy" else f"대시보드 변경: {', '.join(f'{k}={v}' for k, v in applied.items())}")
+        lines.append(f"화면을 바꿨어요: {', '.join(f'{k}={v}' for k, v in applied.items())}")
     else:
         lines = ["질문에서 강종·기간·재질·결함·코일번호를 찾지 못했어요. 오프라인 모드에서는 이렇게 물어보세요:",
                  *[f"- {e}" for e in EXAMPLES]]
@@ -195,19 +211,15 @@ def answer(question: str, state: dict, on_tool=None):
     return result
 
 
-def _defect_text(r: dict, style: str) -> str:
+def _defect_text(r: dict, style: str | None = None) -> str:
     top = [f for f in r["factor_ranking"] if f["kb_consistent"]][:1] or r["factor_ranking"][:1]
     base, now = r["rate_baseline_pct"], r["rate_target_pct"]
     cause = r["kb_cause"]
-    if style == "easy":
-        head = (f"{r['defect_type']} 발생률이 {base}%에서 {now}%로 늘었어요." if base is not None and now > base
-                else f"{r['defect_type']} 발생률은 {now}%예요.")
-        if top:
-            f = top[0]
-            head += (f" 가장 차이가 큰 조건은 **{f['label']}** 쪽이고(결함 난 쪽 {N._fv(f['defect_mean'], f['unit'])}{f['unit']}"
-                     f" vs 정상 {N._fv(f['normal_mean'], f['unit'])}{f['unit']})")
-            head += ", 지식베이스에서도 이 결함의 원인으로 꼽는 조건이에요." if f["kb_consistent"] else "예요."
-        return head + f" 보통 원인은 {cause['process']} 공정의 {N.josa(cause['cause'], '이에요/예요')}."
-    tops = ", ".join(f"{f['label']}(효과크기 {f['effect_size']:+.2f})" for f in r["factor_ranking"][:3])
-    return (f"{r['defect_type']} 발생률 {base}% → {now}% · 원인 후보: {tops} · 지식베이스 원인({cause['process']}): "
-            f"{cause['cause']} ({cause['source']})")
+    head = (f"{r['defect_type']} 발생률이 {base}%에서 {now}%로 늘었어요." if base is not None and now > base
+            else f"{r['defect_type']} 발생률은 {now}%예요.")
+    if top:
+        f = top[0]
+        head += (f" 가장 차이가 큰 조건은 **{f['label']}** 쪽이고(결함 난 쪽 {N._fv(f['defect_mean'], f['unit'])}{f['unit']}"
+                 f" vs 정상 {N._fv(f['normal_mean'], f['unit'])}{f['unit']})")
+        head += ", 지식베이스에서도 이 결함의 원인으로 꼽는 조건이에요." if f["kb_consistent"] else "예요."
+    return head + f" 보통 원인은 {cause['process']} 공정의 {N.josa(cause['cause'], '이에요/예요')}."

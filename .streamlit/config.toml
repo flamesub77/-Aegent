@@ -1,17 +1,45 @@
+# 파랑 계열 테마 (prd_v3 U2) + 현대하모니 글꼴 (prd_v4 T1).
+# 라이트/다크는 OS 설정을 따르고, 화면 오른쪽 위에서 바꿀 수 있다 (ui/theme.py).
+# 글꼴: static/HDharmony-*.ttf (원본 files/현대하모니+L·M·B.ttf). 한 글꼴 묶음으로 등록하고 굵기로 고른다:
+#   L = 400 (기본 본문), M = 500 (탭·버튼·라벨), B = 700 (제목·KPI 숫자·굵은 글씨)
+[server]
+enableStaticServing = true
+
 [theme]
-primaryColor = "#2F6FDE"
-font = "sans serif"
+primaryColor = "#1D4ED8"
+font = "HDharmony, 'Malgun Gothic', sans-serif"
+headingFont = "HDharmony, 'Malgun Gothic', sans-serif"
 baseRadius = "medium"
 
+[[theme.fontFaces]]
+family = "HDharmony"
+url = "app/static/HDharmony-L.ttf"
+weight = 400
+
+[[theme.fontFaces]]
+family = "HDharmony"
+url = "app/static/HDharmony-M.ttf"
+weight = 500
+
+[[theme.fontFaces]]
+family = "HDharmony"
+url = "app/static/HDharmony-B.ttf"
+weight = 700
+
 [theme.light]
+primaryColor = "#1D4ED8"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F3F5F9"
-textColor = "#1E293B"
+secondaryBackgroundColor = "#EFF6FF"
+textColor = "#0F172A"
 
 [theme.dark]
-backgroundColor = "#0F172A"
-secondaryBackgroundColor = "#1E293B"
+primaryColor = "#60A5FA"
+backgroundColor = "#0B1220"
+secondaryBackgroundColor = "#111A2E"
 textColor = "#E2E8F0"
 
 [client]
 toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

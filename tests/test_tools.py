@@ -7,6 +7,7 @@ from config import DATA_DIR
 from tools import db
 from tools.guard import BlockedFileError, ensure_allowed
 from tools.knowledge import load_sections, search_knowledge
+from tools.datasource import get_source
 from tools.query import query_coils
 from tools.registry import TOOL_FUNCTIONS, run_tool, tool_schemas
 
@@ -31,15 +32,15 @@ def test_query_coils_filters():
 
 
 def test_query_coils_total_and_thickness():
-    assert query_coils()["count"] == 4000
+    coils = get_source().coils
+    assert query_coils()["count"] == len(coils)
     r = query_coils(thk_min=1.5)
-    df = db.fetch_coils(thk_min=1.5)
-    assert r["count"] == len(df) and (df["thk"] >= 1.5).all()
+    assert r["count"] == int((coils["thk"] >= 1.5).sum())
 
 
 def test_query_coils_rejects_unknown_grade_and_line():
-    assert "error" in query_coils(grade="DP780")
-    assert "error" in query_coils(line="EGL")
+    assert "error" in query_coils(grade="XX999")
+    assert "error" in query_coils(line="XYZ_LINE")
 
 
 def test_query_coils_sql_injection_is_inert():
@@ -85,7 +86,7 @@ def test_search_knowledge_pins_grade_section():
     r = search_knowledge("CT", grade="IF340_OUT")
     assert r["results"][0]["source"].endswith("3.2 고강도 극저 외판 (IF340_OUT, Ti-Nb 복합 P첨가)")
     assert any("3.6" in x["source"] for x in r["results"])
-    assert "error" in search_knowledge("CT", grade="DP780")
+    assert "error" in search_knowledge("CT", grade="XX999")
 
 
 def test_query_coils_with_baseline():

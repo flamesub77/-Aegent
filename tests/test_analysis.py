@@ -54,7 +54,7 @@ def test_insights_have_numbers_and_actions():
     d = A.diagnose("HSLA590C", "CAL", "2026-05-01", "2026-05-31")
     c = A.compare("HSLA590C", "YS", "CAL", "2026-05-01", "2026-05-31")
     ins = A.insights(d, c)
-    assert "하향 분포" in ins["summary"][0] and any("권취온도" in a for a in ins["actions"])
+    assert "평소보다 낮게 나옴" in ins["summary"][0] and any("권취온도" in a for a in ins["actions"])
 
 
 def test_dashboard_update_validation():

@@ -1,46 +1,41 @@
-"""화면·인사이트·리포트·에이전트 답변에 쓰는 용어 (prd_v2 R6).
+"""화면·인사이트·리포트·에이전트 답변에 쓰는 용어 (prd_v2 R6, prd_v3 U4·W1·W2).
 
-문체(style): "easy" 쉬운 말 · "expert" 금속재료공학 · "stat" 통계(기존 용어).
+v3부터 문체는 쉬운 말 하나다. style 인자는 예전 호출과의 호환용이며 쓰지 않는다.
 회사 용어에 맞추려면 이 파일만 고치면 된다.
 """
 
-STYLES = {"easy": "쉬운 말", "expert": "전문가", "stat": "통계"}
+STYLES = {"easy": "쉬운 말"}
 DEFAULT_STYLE = "easy"
 
 TERMS = {
-    # key: {style: 표현}
-    "group_outlier": {"stat": "이탈군", "easy": "문제 코일", "expert": "문제 코일"},
-    "ref_outlier": {"stat": "기준군", "easy": "정상 코일", "expert": "정상 코일"},
-    "group_period": {"stat": "대상 기간", "easy": "이 기간 코일", "expert": "대상 기간재"},
-    "ref_period": {"stat": "기준 기간", "easy": "나머지 기간 코일", "expert": "비교 기간재"},
-    "mode_period": {"stat": "기간 비교", "easy": "이 기간 vs 나머지 기간", "expert": "기간 비교"},
-    "mode_outlier": {"stat": "이탈군 비교", "easy": "문제 코일 vs 정상 코일", "expert": "문제 코일 vs 정상 코일"},
-    "mode_defect": {"stat": "결함 코일 vs 정상 코일", "easy": "결함 난 코일 vs 정상 코일",
-                    "expert": "결함재 vs 정상재"},
-    "side_label": {"stat": "이탈군 방향", "easy": "문제 코일 기준", "expert": "문제 코일 기준"},
-    "side_low": {"stat": "낮은 쪽", "easy": "낮게 나온 코일", "expert": "하한측"},
-    "side_high": {"stat": "높은 쪽", "easy": "높게 나온 코일", "expert": "상한측"},
-    "side_auto": {"stat": "자동", "easy": "자동", "expert": "자동"},
-    "confounder": {"stat": "교란 요인", "easy": "비교 조건 차이", "expert": "비교 조건 차이"},
-    "stratify": {"stat": "층별 확인이 필요합니다", "easy": "두께·라인·시편 위치별로 나눠서 다시 비교해 보세요",
-                 "expert": "두께·라인·시편 위치별로 나눠 재비교가 필요하다"},
-    "effect_size": {"stat": "효과크기", "easy": "차이 크기", "expert": "효과크기"},
-    "ranking": {"stat": "기여도 순위", "easy": "원인 가능성 순위", "expert": "원인 후보 순위"},
-    "mech_ok": {"stat": "메커니즘 일치", "easy": "야금 원리로 설명됨", "expert": "야금학적 메커니즘 부합"},
-    "mech_bad": {"stat": "메커니즘 불일치", "easy": "원리와 반대 방향", "expert": "메커니즘과 상반"},
-    "mech_none": {"stat": "통계적 연관만 있음", "easy": "같이 움직이지만 원리로는 설명 안 됨",
-                  "expert": "통계적 상관만 존재 (메커니즘 미확인)"},
-    "mech_unknown": {"stat": "판단 불가", "easy": "판단하기 어려움", "expert": "판단 불가"},
-    "sigma": {"stat": "σ", "easy": "표준편차", "expert": "σ"},
+    "group_outlier": "문제 코일",
+    "ref_outlier": "정상 코일",
+    "group_period": "이 기간 코일",
+    "ref_period": "나머지 기간 코일",
+    "mode_period": "이 기간 vs 나머지 기간",
+    "mode_outlier": "문제 코일 vs 정상 코일",
+    "mode_defect": "결함 난 코일 vs 정상 코일",
+    "side_label": "문제 코일 기준",
+    "side_low": "낮게 나온 코일",
+    "side_high": "높게 나온 코일",
+    "side_auto": "자동",
+    "confounder": "비교 조건 차이",
+    "stratify": "두께·라인·시편 위치별로 나눠서 다시 비교해 보세요",
+    "effect_size": "차이 크기",
+    "ranking": "원인 가능성 순위",
+    "mech_ok": "야금 원리로 설명됨",
+    "mech_bad": "원리와 반대 방향",
+    "mech_none": "같이 움직이지만 원리로는 설명 안 됨",
+    "mech_unknown": "판단하기 어려움",
+    "sigma": "표준편차",
+    "lineage": "공정 순서",            # v2 "계보" (prd_v3 W1)
+    "single_coil": "코일분석",        # v2 "코일 단건 분석", v4 "단일 코일 분석" (prd_v5 C4)
 }
 
 JUDGEMENT = {
-    "상향 분포": {"stat": "상향 분포", "easy": "평소보다 높게 나옴", "expert": "상향 분포"},
-    "하향 분포": {"stat": "하향 분포", "easy": "평소보다 낮게 나옴", "expert": "하향 분포"},
-    "상향 경향": {"stat": "상향 경향", "easy": "약간 높은 편", "expert": "상향 경향"},
-    "하향 경향": {"stat": "하향 경향", "easy": "약간 낮은 편", "expert": "하향 경향"},
-    "정상": {"stat": "정상", "easy": "평소와 비슷함", "expert": "정상 범위"},
-    "비교 불가": {"stat": "비교 불가", "easy": "비교할 기간 없음", "expert": "비교 불가"},
+    "상향 분포": "평소보다 높게 나옴", "하향 분포": "평소보다 낮게 나옴",
+    "상향 경향": "약간 높은 편", "하향 경향": "약간 낮은 편",
+    "정상": "평소와 비슷함", "비교 불가": "비교할 기간 없음",
 }
 
 MECH_KEY = {"일치": "mech_ok", "불일치": "mech_bad", "판단 불가": "mech_unknown", "지식베이스 근거 없음": "mech_none"}
@@ -56,48 +51,119 @@ HELP = {  # 화면 도움말(?)
 }
 
 
-def t(key: str, style: str = DEFAULT_STYLE) -> str:
-    entry = TERMS[key]
-    return entry.get(style) or entry["stat"]
+def t(key: str, style: str | None = None) -> str:
+    return TERMS[key]
 
 
-def judgement(label: str, style: str = DEFAULT_STYLE) -> str:
-    return JUDGEMENT.get(label, {}).get(style, label)
+def judgement(label: str, style: str | None = None) -> str:
+    return JUDGEMENT.get(label, label)
 
 
-def mechanism(status: str, style: str = DEFAULT_STYLE) -> str:
-    return t(MECH_KEY.get(status, "mech_none"), style)
+def mechanism(status: str, style: str | None = None) -> str:
+    return t(MECH_KEY.get(status, "mech_none"))
 
 
-def mode(code: str, style: str = DEFAULT_STYLE) -> str:
-    return t(f"mode_{code}", style)
+def mode(code: str, style: str | None = None) -> str:
+    return t(f"mode_{code}")
 
 
-def group_names(mode_code: str, side: str | None, style: str = DEFAULT_STYLE) -> tuple[str, str]:
+def group_names(mode_code: str, side: str | None, style: str | None = None) -> tuple[str, str]:
     """(비교할 그룹 이름, 기준 그룹 이름)."""
     if mode_code == "outlier":
-        name = t("group_outlier", style)
+        name = t("group_outlier")
         if side in ("low", "high"):
-            name += f" ({t('side_' + side, style)})"
-        return name, t("ref_outlier", style)
-    return t("group_period", style), t("ref_period", style)
+            name += f" ({t('side_' + side)})"
+        return name, t("ref_outlier")
+    return t("group_period"), t("ref_period")
 
 
-def warning_text(w: dict, style: str = DEFAULT_STYLE) -> str:
+def warning_text(w: dict, style: str | None = None) -> str:
     """analysis 경고 코드를 문장으로."""
     code = w.get("code")
     if code == "confounder":
         col = CONFOUNDER_COL.get(w["column"], w["column"])
-        if style == "stat":
-            return f"{col} 구성비가 두 군에서 최대 {w['gap_pp']}%p 다릅니다. 층별 확인이 필요합니다."
-        if style == "expert":
-            return f"두 그룹의 {col} 구성비가 최대 {w['gap_pp']}%p 달라 {col} 영향이 섞여 있을 수 있다. {t('stratify', style)}."
-        return f"두 그룹의 {col} 비율이 최대 {w['gap_pp']}%p 달라요. 차이가 {col} 때문일 수도 있으니 {t('stratify', style)}."
+        return f"두 그룹의 {col} 비율이 최대 {w['gap_pp']}%p 달라요. 차이가 {col} 때문일 수도 있으니 {t('stratify')}."
     if code in ("small_group", "small_target"):
-        n = w["n"]
-        if style == "easy":
-            return f"비교한 코일이 {n}개뿐이라 결론을 믿기엔 조금 적어요."
-        return f"비교 코일이 {n}개로 적어 판정 신뢰도가 낮습니다."
+        return f"비교한 코일이 {w['n']}개뿐이라 결론을 믿기엔 조금 적어요."
     if code == "widened":
         return w.get("text", "")
     return str(w)
+
+
+# ---------------------------------------------------------------------------
+# prd_v5 C2·C3: 이모지 대응표, 작은 설명 한 줄(DESC), 제목 옆 (?) 도움말(CARD_HELP). 화면·AI 보고서 공통
+# ---------------------------------------------------------------------------
+EMOJI = {
+    "production": "📦", "material": "🧪", "thickness": "📏", "spc": "🚨",
+    "ranking": "🏆", "scatter": "🔗", "trend": "📈", "confounder": "⚖️", "checklist": "✅",
+    "pareto": "🥇", "compare": "🆚", "monthly": "🗓", "defect_factor": "🏆",
+    "data": "🗂", "filter": "🔎", "files": "📂", "favorite": "★",
+}
+
+SECTIONS = {  # 재질개요 3구역 (prd_v5 T2): (번호, 이모지, 이름, 작은 설명, (?) 도움말)
+    "production": ("①", "📦", "생산량", "연도별·월별 생산 규모",
+                   "막대는 코일 수, 선은 중량(톤)이에요.\n\n"
+                   "올해처럼 1년이 안 된 해는 '연환산'(12개월로 늘린 값)으로 전년과 비교해요.\n\n"
+                   "생산이 몰린 달에는 재질 흩어짐이 커지기 쉬우니 ② 재질현황의 월별 추이와 같이 보세요."),
+    "material": ("②", "🧪", "재질현황", "분포 · 추이 · 조기 감시",
+                 "고른 재질마다 분포(빨간 점선 = SPEC)를 보여주고, 아래에 월별 추이와 🚨 조기 감시(EWMA·CUSUM)가 있어요.\n\n"
+                 "기간을 고르면 '이 기간 vs 나머지 기간', 전체 기간이면 '문제 코일 vs 정상 코일'로 비교해요.\n\n"
+                 "이상하면 ⚙️ 공정분석 탭에서 어느 공정 인자가 달랐는지 확인하세요."),
+    "thickness": ("③", "📏", "두께별 재질현황", "두께 구간별 평균·만족률",
+                  "두께를 0.75 / 1.0 / 1.4mm로 나눠 구간별 상자그림과 표를 보여줘요.\n\n"
+                  "상자 = 가운데 50% 코일, 가로선 = 중앙값, 점선 = 평균. 주황 상자는 만족률이 가장 낮은 구간이에요.\n\n"
+                  "얇을수록 같은 공정 조건에서도 재질이 달라지기 쉬워요. 문제 구간만 사이드바 두께로 걸러 원인을 보세요."),
+}
+
+DESC = {  # 탭·기능 아래 작은 회색 설명 한 줄
+    "공정분석": "문제 코일과 정상 코일의 공정 인자를 비교해 원인 후보를 찾아요",
+    "결함분석": "선택 강종의 결함 순위와, 같은 결함을 다른 강종과 비교해요",
+    "코일분석": "코일 번호로 양산 실적과 비교해요 (시생산·클레임)",
+    "데이터": "표에서 값을 고치거나 이상치 행을 빼고 [분석에 반영]을 누르세요",
+}
+
+CARD_HELP = {  # 카드 제목 옆 (?) — ① 무엇 ② 읽는 법 ③ 이상하면 ④ 계산
+    "kpi": "고른 재질의 SPEC·평균·작은 분포·만족률이에요.\n\n▲▼는 나머지 기간 대비 평균 변화, 빨간 막대는 SPEC 밖 코일이에요. "
+           "만족률 95% 미만이면 빨간 테두리(⚠️)로 표시해요.",
+    "production": "연도별 코일 수(막대)와 중량(선). '규격별'을 켜면 강종 필터와 상관없이 전체 냉연규격을 쌓아 보여줘요.",
+    "production_monthly": "월별 코일 수예요. 색칠한 달이 지금 보는 기간이에요.",
+    "distribution": "색칠한 막대 = 비교할 코일(이 기간 또는 문제 코일), 회색 = 기준 코일, 빨간 점선 = SPEC.\n\n"
+                    "두 봉우리가 떨어져 있을수록 차이가 커요. 평균이 기준 대비 표준편차 1배 이상 움직이면 🔺/🔻로 표시해요.",
+    "monthly": "월별 상자그림이에요. 상자 높이가 크면 그 달 코일끼리 흩어짐이 큰 거예요. 색칠한 달이 선택 기간이에요.",
+    "spc": "🚨 조기 감시: 스펙을 벗어나기 전에 평균이 움직이기 시작한 날을 찾아요.\n\n"
+           "• EWMA = 최근 값에 무게를 더 둔 이동 평균이라, 평균이 조금씩 움직이는 걸 일찍 잡아요 (점선 = 관리한계).\n\n"
+           "• CUSUM = 기준보다 높은(낮은) 값을 계속 더해서, 한쪽으로 쏠리는 흐름을 잡아요 (아래 그래프, h를 넘으면 경보).\n\n"
+           "주황 배경이 경보 구간이에요. 경보 시점 전후로 바뀐 공정 조건을 ⚙️ 공정분석에서 확인하세요.\n\n"
+           "**추천 조건** (⚙에서 버튼으로 고름)\n\n"
+           "| 상황 | λ | L | k | h | 기준 |\n|---|---|---|---|---|---|\n"
+           "| 기본 | 0.2 | 3.0 | 0.5σ | 5σ | 6개월 |\n| 작은 변화도 빨리 (시생산·신강종) | 0.1 | 2.7 | 0.25σ | 4σ | 3개월 |\n"
+           "| 헛경보 줄이기 (산포 큰 강종) | 0.3 | 3.0 | 0.75σ | 6σ | 12개월 |",
+    "heatmap": "강종(행) × 월(열)마다 평균이 그 강종 전체 평균에서 표준편차 몇 배 벗어났는지예요.\n\n"
+               "주황 = 평소보다 높게, 파랑 = 낮게. 한 달에 여러 강종이 같이 진하면 설비 공통 원인을 의심해요.",
+    "rvalue": "r̄ = (r0 + 2·r45 + r90) / 4. 클수록 딥드로잉(깊게 눌러 성형)에 유리해요.\n\n"
+              "방향끼리 차이가 크면 성형할 때 가장자리가 물결처럼(이어링) 나올 수 있어요.",
+    "thickness": "두께 구간별 상자그림이에요. 주황 상자 = 만족률이 가장 낮은 구간. 아래 표에 코일 수·평균·표준편차·만족률·Cpk가 있어요.",
+    "ranking": "🏆 원인 순위: 문제 코일과 정상 코일의 공정 인자 차이를 점수로 줄 세웠어요.\n\n"
+               "막대가 길수록 차이가 커요. 진한 막대(원리 ✓)는 지식베이스의 야금 원리와 방향이 맞는 인자예요.\n\n"
+               "오른쪽 위에서 순위 계산 방법(차이 크기·순위 상관·랜덤포레스트·부스팅·라쏘)을 바꿀 수 있어요.",
+    "scatter": "🔗 인자 관계: x = 공정 인자, y = 재질. 색 점 = 문제 코일, 회색 = 정상 코일, 빨간 점선 = SPEC.\n\n"
+               "상관은 -1~1, 0이면 관계 없음. 오른쪽 위에서 인자를 바꿀 수 있어요.",
+    "trend": "📈 고른 인자의 일별 추이예요. 점선 = 표준 조건. 표준에서 멀어진 시점과 🚨 조기 감시 경보 시점을 비교해 보세요.",
+    "confounder": "⚖️ 비교 조건: 두 그룹의 두께·라인·시편 위치 비율이에요.\n\n"
+                  "비율이 많이 다르면, 차이가 공정이 아니라 구성 때문일 수 있어요. 버튼을 누르면 그 조건만 걸러 다시 비교해요.",
+    "checklist": "1순위 원인 인자들의 표준 조치예요. 확인한 항목에 체크하세요 (체크는 저장되지 않아요).",
+    "sigma": "전체 기간을 볼 때 '문제 코일'을 정하는 기준이에요.\n\n"
+             "평균 ± kσ 밖 코일이 문제 코일이에요 (기본 1.0σ, 0.1 단위). 스펙을 벗어난 코일은 σ와 상관없이 늘 문제 코일이에요.\n\n"
+             "작게 하면 문제 코일이 많아지고(민감), 크게 하면 정말 튀는 코일만 남아요. 기간을 고르면 '이 기간 vs 나머지 기간'으로 비교해요.",
+    "pareto": "🥇 선택 강종 안에서 결함 유형별 발생률(막대)과 누적 비율(선)이에요.\n\n"
+              "회색 막대는 나머지 기간이에요. 위쪽 몇 개 결함이 대부분을 차지하면 그 결함부터 잡으세요.",
+    "compare": "🆚 고른 결함이 강종마다 얼마나 나는지예요. 빨간 막대 = 선택 강종, 점선 = 전체 평균.\n\n"
+               "선택 강종만 높으면 강종(성분·공정 조건) 문제, 여러 강종이 같이 높으면 설비 공통 원인을 의심해요.",
+    "defect_monthly": "🗓 선택 강종의 월별 결함률(유형별로 쌓음). 빨강 = 고른 결함.",
+    "defect_factor": "결함 난 코일과 정상 코일의 공정 인자 차이 순위예요. 진한 막대(✓) = 지식베이스 원인과 방향 일치.",
+    "data": "🗂 표에서 값을 바로 고치거나, 맨 앞 '제외'를 체크해 이상치 행을 분석에서 뺄 수 있어요.\n\n"
+            "[분석에 반영]을 누르면 수정본이 새 데이터 파일로 추가되고 모든 탭이 다시 계산돼요. 원본 파일은 그대로예요.\n\n"
+            "이상치 도우미: 재질·인자를 고르면 평균 ± kσ 밖이거나 SPEC에서 50% 이상 벗어난 행을 찾아 표시해요.",
+    "mode": "오프라인 = 외부 통신 없이 규칙대로 해석해요.\n\nAI 모드 = 🔑에 넣은 OpenAI·Claude·Gemini 키로 AI가 답하고 AI 보고서 문장을 써요. "
+            "키가 없거나 연결이 안 되면 오프라인으로 대신 답해요.",
+}

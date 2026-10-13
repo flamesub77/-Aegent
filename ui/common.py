@@ -1,6 +1,4 @@
 """화면 공통 요소: 배지, 모드·데이터 표시, 단계 이름."""
-import config
-from agent import router
 from tools import terms as T
 from tools.datasource import get_source
 
@@ -12,25 +10,25 @@ STEP_LABEL = {
     "diagnose_distribution": "② 분포 진단",
     "compare_groups": "③ 원인 인자 비교 · 비교 조건 차이 확인",
     "trace_defect": "③ 결함 원인 추적",
-    "analyze_coil": "③ 코일 단건 분석 (양산 대비)",
+    "analyze_coil": "③ 단일 코일 분석 (양산 대비)",
     "search_knowledge": "④ 야금 원리 근거 확인 (지식베이스)",
     "update_dashboard": "⑤ 대시보드 갱신",
 }
 
 
-def badge(label: str, style: str = T.DEFAULT_STYLE) -> str:
-    """판정 배지 (문체에 맞는 말로)."""
-    text = T.judgement(label, style)
+def badge(label: str, style: str | None = None) -> str:
+    """판정 배지 (쉬운 말로)."""
+    text = T.judgement(label)
     color = next((c for k, c in BADGE.items() if label.startswith(k) or text.startswith(k)), "gray")
     return f":{color}-badge[{text}]"
 
 
-def mode_badge(mode: str) -> str:
-    eff = router.effective_mode(mode)
-    if eff == "offline":
-        why = "" if mode == "offline" else " (API 키 없음)"
+def mode_badge(mode: str | None = None, api_key: str | None = None) -> str:
+    from ui import ai
+    if ai.effective() == "offline":
+        why = "" if ai.mode() == "offline" else " (AI 키 없음)"
         return f":green-badge[:material/lock: 오프라인 · 외부 전송 없음{why}]"
-    return f":violet-badge[:material/smart_toy: 에이전트 · {config.MODEL}]"
+    return f":blue-badge[:material/smart_toy: AI 모드 · {ai.label()}]"
 
 
 def source_badge() -> str:

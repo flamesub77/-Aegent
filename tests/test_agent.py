@@ -39,7 +39,7 @@ def test_agent_runs_tools_and_updates_dashboard():
 
     assert [c.name for c in result.tool_calls] == ["compare_groups", "update_dashboard"]
     assert json.loads(result.tool_calls[0].output)["ranking"][0]["factor"] == "CT"
-    assert result.state["factor"] == "CT" and result.state["view"] == "원인 분석"
+    assert result.state["factor"] == "CT" and result.state["view"] == "공정분석"
     assert str(result.state["start"]) == "2026-05-01" and set(result.changed) >= {"start", "end", "line"}
 
     # 두 번째 요청에 function_call과 function_call_output이 짝지어 들어갔는지
@@ -52,7 +52,7 @@ def test_agent_runs_tools_and_updates_dashboard():
 
 
 def test_invalid_dashboard_update_is_reported():
-    client = FakeClient([(None, [("update_dashboard", {"grade": "DP780", "prop": "TS"})], "completed"),
+    client = FakeClient([(None, [("update_dashboard", {"grade": "XX999", "prop": "TS"})], "completed"),
                          ("완료", [], "completed")])
     result = run_agent("780DP로 바꿔", ds.defaults(), client=client)
     out = json.loads(result.tool_calls[0].output)
@@ -79,4 +79,4 @@ def test_structured_report_from_tool_outputs():
     rep = run_agent("질문", ds.defaults(), client=client).report
     assert rep["judgement"]["judgement"] == "하향 분포" and rep["judgement"]["property"] == "YS"
     assert rep["causes"][0]["factor"] == "CT" and rep["causes"][0]["mechanism"] == "일치"
-    assert "인자 기여도" in rep["charts"] and rep["text"] == "리포트 본문"
+    assert "원인 가능성 순위" in rep["charts"] and rep["text"] == "리포트 본문"

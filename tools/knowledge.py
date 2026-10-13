@@ -29,7 +29,7 @@ GRADE_SECTION = {"IF270_IN": "3.1", "IF340_OUT": "3.2", "BH340_OUT": "3.3", "LC3
                  "HSLA590C": "3.5"}
 
 
-FAMILY_SECTION = {"IF": "3.1", "IF_HS": "3.2", "BH": "3.3", "LC": "3.4", "HSLA": "3.5"}
+FAMILY_SECTION = {"IF": "3.1", "IF_HS": "3.2", "BH": "3.3", "LC": "3.4", "HSLA": "3.5", "DP": "3.8", "TRIP": "3.9", "MART": "3.10"}
 
 
 def _family_section(grade: str):
@@ -42,7 +42,7 @@ def _family_section(grade: str):
 
 
 def _pick(prefix: str):
-    return next((s for s in load_sections() if s["title"].startswith(prefix)), None)
+    return next((s for s in load_sections() if s["title"].split(" ")[0] == prefix), None)
 
 
 def search_knowledge(query: str = "", top_k: int = 3, grade: str | None = None) -> dict:

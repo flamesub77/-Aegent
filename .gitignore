@@ -14,3 +14,16 @@ mappings/
 files.zip
 미니 프로젝트/
 review/screenshots/
+
+# 패키지 빌드·설치 산출물
+dist/
+build/
+*.egg-info/
+.venv/
+wheels/
+
+# 사내 글꼴(현대하모니)은 라이선스 확인 전까지 저장소에 올리지 않는다 (로컬·wheel 빌드에는 사용)
+*.ttf
+# 로컬 실행 설정
+.claude/
+.playwright-mcp/

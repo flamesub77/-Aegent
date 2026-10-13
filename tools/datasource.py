@@ -1,7 +1,7 @@
 """데이터 소스: 분석 엔진이 쓰는 코일 데이터와 강종 스펙을 한 곳에서 제공한다.
 
-- SampleSource: files/steel.db (가상 데이터)
-- UploadSource: 사용자가 올린 파일 (tools/upload.py가 표준 컬럼으로 바꾼 DataFrame)
+- 샘플: files/coil data(pds).xlsx (회사 양식 가상 데이터, prd_v3 D1). 읽는 데 오래 걸려 사용자 캐시 폴더에 저장해 둔다.
+- 업로드: 사용자가 올린 파일 (tools/upload.py 또는 tools/pds.py가 표준 컬럼으로 바꾼 DataFrame)
 
 현재 소스는 실행 컨텍스트(스레드)별로 정한다. Streamlit은 세션마다 스크립트를 따로 실행하므로
 app.py가 매 실행 첫머리에 use_source()를 부르면 세션끼리 섞이지 않는다.
@@ -12,12 +12,13 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 
-from tools import db
+import config
+from tools import db, pds
 
 REQUIRED = ["coil_no", "prod_date", "grade", "line"]
 SPEC_COLUMNS = {  # 재질 → (하한 컬럼, 상한 컬럼)
     "YS": ("ys_min", "ys_max"), "TS": ("ts_min", "ts_max"), "EL": ("el_min", None), "BH": ("bh_min", None),
-    "rbar": ("rbar_min", None), "n_value": ("n_min", None), "dr": (None, "dr_max"),
+    "rbar": ("rbar_min", None), "n_value": ("n_min", None),
 }
 
 
@@ -49,9 +50,13 @@ class DataSource:
         if "thk" in df:
             df["thk_band"] = pd.cut(df["thk"], [0, 0.75, 1.0, 1.4, 99],
                                     labels=["~0.75", "0.75~1.0", "1.0~1.4", "1.4~"]).astype(str)
-        if {"r0", "r45", "r90"} <= set(df.columns):  # prd_v2 R1: r̄, Δr 자동 계산
-            df["rbar"] = ((df["r0"] + 2 * df["r45"] + df["r90"]) / 4).round(3)
-            df["dr"] = ((df["r0"] - 2 * df["r45"] + df["r90"]) / 2).round(3)
+        if {"r0", "r45", "r90"} <= set(df.columns):  # r̄: 데이터 값 우선, 비어 있으면 계산 (prd_v3 D1)
+            calc = ((df["r0"] + 2 * df["r45"] + df["r90"]) / 4).round(3)
+            df["rbar"] = df["rbar_given"].fillna(calc) if "rbar_given" in df else calc
+        elif "rbar_given" in df:
+            df["rbar"] = df["rbar_given"]
+        if "YR" not in df and {"YS", "TS"} <= set(df.columns):
+            df["YR"] = (df["YS"] / df["TS"]).round(3)
         df["has_defect"] = df["defect_type"].fillna("없음") != "없음" if "defect_type" in df else False
         df["passed"] = df["judge"] == "합격" if "judge" in df else np.nan
         return df.reset_index(drop=True)
@@ -94,9 +99,36 @@ class DataSource:
         return out
 
 
+def _load_sample_pds() -> pd.DataFrame:
+    """샘플 xlsx → 표준 DataFrame. 파일 크기·수정 시각이 같으면 캐시를 쓴다."""
+    path = config.SAMPLE_XLSX
+    stat = path.stat()
+    cache = config.CACHE_DIR / f"sample_{stat.st_size}_{int(stat.st_mtime)}.pkl"
+    if cache.exists():
+        return pd.read_pickle(cache)
+    df = pds.standardize(pd.read_excel(path))
+    config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    for old in config.CACHE_DIR.glob("sample_*.pkl"):
+        old.unlink(missing_ok=True)
+    df.to_pickle(cache)
+    return df
+
+
+def base_grades() -> pd.DataFrame:
+    """강종 기준표: steel.db grade_master + files/grade_family.csv (신규 강종 계열·이름, prd_v5 D1)."""
+    base = db.load_grade_master()
+    path = config.DATA_DIR / "grade_family.csv"
+    if path.exists():
+        fam = pd.read_csv(path, encoding="utf-8-sig")
+        extra = fam[~fam["grade"].isin(base["grade"])]
+        base = pd.concat([base, extra], ignore_index=True)
+    return base
+
+
 @lru_cache(maxsize=1)
 def sample_source() -> DataSource:
-    return DataSource(db.fetch_coils(), db.load_grade_master(), "샘플 데이터 (steel.db)", "sample")
+    df = _load_sample_pds()
+    return DataSource(df, pds.grade_table(df, base_grades()), f"{config.SAMPLE_XLSX.name} (기본)", "sample")
 
 
 _current: ContextVar[DataSource | None] = ContextVar("datasource", default=None)

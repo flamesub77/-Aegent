@@ -1,4 +1,4 @@
-"""코일 단건 분석 화면 (prd_v2 R3): 시생산·클레임 코일 vs 같은 조건 양산 실적."""
+"""단일 코일 분석 화면 (prd_v2 R3, prd_v3 W1·W2): 시생산·클레임 코일 vs 같은 조건 양산 실적."""
 import io
 from datetime import datetime
 
@@ -10,6 +10,7 @@ from tools import coil_lookup as L
 from tools import narrative as N
 from tools import terms as T
 from tools.datasource import get_source
+from ui.theme import show
 from tools.domain import PROP_DECIMALS, PROP_LABEL, PROP_SHORT, PROP_UNIT
 
 JUDGE_BADGE = {"합격": ":green-badge[스펙 합격]", "미달": ":red-badge[스펙 미달]", "초과": ":red-badge[스펙 초과]"}
@@ -20,12 +21,12 @@ def _analyze(source_key, ids, id_type, months, same_line, same_thk):
     return L.analyze_coil(ids, id_type, months, same_line, same_thk)
 
 
-def _report_md(res: dict, style: str) -> str:
-    out = [f"# 코일 단건 분석 리포트", "", f"작성 {datetime.now():%Y-%m-%d %H:%M} · 데이터 {get_source().name}", ""]
+def _report_md(res: dict) -> str:
+    out = ["# 단일 코일 분석 리포트", "", f"작성 {datetime.now():%Y-%m-%d %H:%M} · 데이터 {get_source().name}", ""]
     for c in res["coils"]:
         out += [f"## {c['coil_no']} ({c['grade']} · {c['line']} · {c['prod_date']}{' · 시생산' if c['trial'] else ''})", "",
                 "양산 비교 기준: " + ", ".join(f"{k} {v}" for k, v in c["baseline_conditions"].items())
-                + f" · 양산 {c['n_baseline']}개", "", *[f"- {x}" for x in N.coil_story(c, style)], "",
+                + f" · 양산 {c['n_baseline']}개", "", *[f"- {x}" for x in N.coil_story(c)], "",
                 "| 재질 | 값 | 양산 중앙값 | z | 백분위 | 스펙 |", "| --- | --- | --- | --- | --- | --- |",
                 *[f"| {PROP_SHORT[m['prop']]} | {m['value']} | {m['mass_median']} | {m['z']} | {m['percentile']} | "
                   f"{m['judge'] or '-'} |" for m in c["materials"]], "",
@@ -48,7 +49,7 @@ def _report_xlsx(res: dict) -> bytes:
                        "mechanism": (f.get("mechanism") or {}).get("status")}
                       for c in res["coils"] for f in c["factors"]]).to_excel(w, sheet_name="공정", index=False)
         if res["lineage"]:
-            pd.DataFrame(res["lineage"]).to_excel(w, sheet_name="계보", index=False)
+            pd.DataFrame(res["lineage"]).to_excel(w, sheet_name="공정 순서", index=False)
     return buf.getvalue()
 
 
@@ -64,7 +65,7 @@ def _material_card(col, m: dict):
         st.progress(min(max(m["percentile"] / 100, 0.0), 1.0), text=f"양산 중 {m['percentile']:.0f}% 위치")
 
 
-def _coil_block(c: dict, style: str):
+def _coil_block(c: dict, theme: str | None):
     src = get_source()
     with st.container(border=True):
         st.markdown(f"#### {c['coil_no']} · {c['grade']} · {c['line']} · {c['prod_date']}"
@@ -73,10 +74,10 @@ def _coil_block(c: dict, style: str):
         st.caption("양산 비교 기준: " + " · ".join(f"{k} {v}" for k, v in c["baseline_conditions"].items())
                    + f" · 양산 {c['n_baseline']}개 (시생산·대상 코일 제외, 중앙값·MAD 기준)")
         for w in c["warnings"]:
-            st.warning(T.warning_text(w, style), icon=":material/tune:")
+            st.warning(T.warning_text(w), icon=":material/tune:")
         with st.container(border=True):
             st.markdown("**해석**")
-            for line in N.coil_story(c, style):
+            for line in N.coil_story(c):
                 st.markdown(f"- {line}")
         mats = c["materials"]
         for i in range(0, len(mats), 4):
@@ -87,22 +88,23 @@ def _coil_block(c: dict, style: str):
         spec = src.spec(c["grade"])
         cols = st.columns(3)
         for i, m in enumerate(mats):
-            cols[i % 3].plotly_chart(C.coil_position(base[m["prop"]], m["value"], m["prop"], spec.get(m["prop"], (None, None)),
-                                                     title=f"{PROP_SHORT[m['prop']]} 양산 분포 위 이 코일"),
-                                     width="stretch", key=f"cp_{c['coil_no']}_{m['prop']}")
-        st.plotly_chart(C.process_diff(c["factors"]), width="stretch", key=f"pd_{c['coil_no']}")
+            with cols[i % 3]:
+                show(C.coil_position(base[m["prop"]], m["value"], m["prop"], spec.get(m["prop"], (None, None)),
+                                     title=f"{PROP_SHORT[m['prop']]} 양산 분포 위 이 코일"),
+                     theme, key=f"cp_{c['coil_no']}_{m['prop']}")
+        show(C.process_diff(c["factors"]), theme, key=f"pd_{c['coil_no']}")
         with st.expander("공정 인자 전체 표"):
             st.dataframe(pd.DataFrame([{"공정": f["process"], "인자": f["label"], "단위": f["unit"], "이 코일": f["value"],
                                         "양산 중앙값": f["mass_median"], "z": f["z"], "표준": f["standard"],
                                         "표준조건 이탈": "⚠" if f["out_of_standard"] else "",
-                                        "야금 원리": T.mechanism((f.get("mechanism") or {}).get("status", ""), style)
+                                        "야금 원리": T.mechanism((f.get("mechanism") or {}).get("status", ""))
                                         if f.get("mechanism") else "-"} for f in c["factors"]]),
                          hide_index=True, width="stretch")
 
 
 def render(state: dict, source_key: str):
-    style = state["style"]
-    st.markdown("##### 코일 단건 분석 · 시생산 코일을 같은 조건 양산 실적과 비교")
+    theme = st.session_state.get("ui_theme")
+    st.markdown(f"##### {T.t('single_coil')} · 시생산 코일을 같은 조건 양산 실적과 비교")
     c1, c2 = st.columns([1, 3])
     c1.selectbox("번호 종류", list(L.ID_TYPES), key="d_id_type", format_func=L.ID_TYPES.get,
                  help="슬라브·열연코일·히트번호로 조회하면 딸린 냉연코일을 모두 분석합니다.")
@@ -130,14 +132,14 @@ def render(state: dict, source_key: str):
                    icon=":material/search_off:")
     if not res["coils"]:
         return
-    d1, d2, _ = st.columns([1, 1, 3])
-    d1.download_button("리포트 MD", _report_md(res, style), "coil_report.md", "text/markdown",
+    d1, d2, _ = st.columns([1.4, 1.4, 2.2])
+    d1.download_button("리포트 MD", _report_md(res), "coil_report.md", "text/markdown",
                        icon=":material/download:", width="stretch")
     d2.download_button("리포트 Excel", _report_xlsx(res), "coil_report.xlsx",
                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        icon=":material/download:", width="stretch")
     if len(res["lineage"]) > 1 or st.session_state["d_id_type"] != "coil_no":
-        with st.expander(f"계보 (슬라브 → 열연코일 → 냉연코일) · {len(res['lineage'])}개", expanded=True):
+        with st.expander(f"{T.t('lineage')} (슬라브 → 열연코일 → 냉연코일) · {len(res['lineage'])}개", expanded=True):
             st.dataframe(pd.DataFrame(res["lineage"]), hide_index=True, width="stretch")
     if len(res["coils"]) > 1:
         st.markdown(f"**{len(res['coils'])}개 코일 요약**")
@@ -151,11 +153,11 @@ def render(state: dict, source_key: str):
                 f"**{x['label']}** ({'높음' if x['direction'] == '+' else '낮음'}, {x['coils']}/{x['of']}개)"
                 for x in res["common"]), icon=":material/join:")
     for c in res["coils"][:5]:
-        _coil_block(c, style)
+        _coil_block(c, theme)
     if len(res["coils"]) > 5:
         with st.expander(f"나머지 {len(res['coils']) - 5}개 코일"):
             for c in res["coils"][5:]:
-                _coil_block(c, style)
+                _coil_block(c, theme)
 
 
 def src_trials() -> list[str]:

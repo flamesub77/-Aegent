@@ -12,7 +12,7 @@ from tools.distribution import diagnose_distribution
 from tools.domain import DEFECTS, FACTORS
 from tools.knowledge import search_knowledge
 from tools.query import query_coils
-from tools.terms import STYLES
+from tools.ranking import MODELS
 
 FACTOR_GUIDE = ", ".join(f"{k}={v[0]}" for k, v in FACTORS.items())
 
@@ -33,7 +33,7 @@ def tool_schemas() -> list[dict]:
     grade = {"type": "string", "enum": ds.grades(), "description": "강종 코드"}
     line = {"type": "string", "enum": ds.lines()[1:], "description": "소둔 라인. 전체면 생략"}
     props = {"type": "string", "enum": ds.props(),
-             "description": "재질. rbar=평균 r값(r̄), n_value=n값, dr=평면이방성 Δr"}
+             "description": "재질. YS=항복강도(화면 표기 YP), rbar=평균 r값(r̄), n_value=n값"}
     date = {"type": "string", "description": f"YYYY-MM-DD (데이터 기간 {lo}~{hi})"}
     ids = {"type": "string", "enum": list(coil_lookup.ID_TYPES),
            "description": "coil_no=냉연코일, hot_coil_no=열연코일, slab_no=슬라브, heat_no=히트"}
@@ -41,7 +41,7 @@ def tool_schemas() -> list[dict]:
         _fn("get_dashboard_state", "사용자가 지금 보고 있는 대시보드의 필터와 그래프 변수를 반환한다.", {}),
         _fn("update_dashboard",
             "대시보드 필터·그래프 변수를 바꿔 사용자가 보는 화면을 갱신한다. 사용자가 그래프나 조건 변경을 요청하거나, "
-            "분석 결과를 보여주기 좋은 화면(예: 원인 인자 산점도, 코일 단건 분석)으로 전환할 때 사용. 바꿀 항목만 넣는다.",
+            "분석 결과를 보여주기 좋은 화면(예: 원인 인자 산점도, 코일분석 탭)으로 전환할 때 사용. 바꿀 항목만 넣는다.",
             {"grade": grade, "line": {"type": "string", "enum": ds.lines()},
              "start_date": date, "end_date": date, "prop": props,
              "factor": {"type": "string", "enum": ["자동"] + list(FACTORS),
@@ -50,11 +50,25 @@ def tool_schemas() -> list[dict]:
              "side": {"type": "string", "enum": list(ds.SIDES),
                       "description": "문제 코일 기준: low=낮게 나온 코일, high=높게 나온 코일"},
              "view": {"type": "string", "enum": ds.VIEWS, "description": "보여줄 화면"},
-             "coil_ids": {"type": "string", "description": "코일 단건 분석 대상 번호 (여러 개면 쉼표)"},
+             "coil_ids": {"type": "string", "description": "단일 코일 분석 대상 번호 (여러 개면 쉼표)"},
              "id_type": ids,
-             "style": {"type": "string", "enum": list(STYLES), "description": "해석 문체"},
-             "thk_band": {"type": "string", "enum": ds.THK_BANDS,
-                          "description": "두께 구간 필터 (비교 조건 차이가 있을 때 나눠서 다시 비교)"},
+             "model": {"type": "string", "enum": list(MODELS),
+                       "description": "원인 순위 계산 모델: " + ", ".join(f"{k}={v}" for k, v in MODELS.items())},
+             "thk_band": {"type": "string", "enum": list(ds.THK_BANDS),
+                          "description": "두께 구간 (비교 조건 차이가 있을 때 나눠서 다시 비교). thk_min·thk_max로 바뀜"},
+             "thk_min": {"type": "number", "description": "두께 하한 mm"},
+             "thk_max": {"type": "number", "description": "두께 상한 mm"},
+             "aims": {"type": "array", "items": {"type": "string"}, "description": "출강목표 필터"},
+             "props": {"type": "array", "items": props, "description": "화면에 보여줄 재질 (빈 목록 = TS)"},
+             "sigma": {"type": "number", "minimum": 0.5, "maximum": 3.0,
+                       "description": "전체 기간 비교의 문제 코일 기준 (평균 ± sigma·σ, 기본 1.0)"},
+             "spec_cols": {"type": "array", "items": {"type": "string", "enum": list(ds.SPEC_COLS)},
+                           "description": "규격약호 기준 (압연 spec_roll, 정정 spec_fin, 둘 다 가능)"},
+             "defect_scope": {"type": "string", "enum": list(ds.DEFECT_SCOPES),
+                              "description": "결함분석 화면: grade=선택 강종, all=전체 강종(강종별 비교)"},
+             "uses": {"type": "array", "items": {"type": "string"}, "description": "용도코드 필터"},
+             "specs": {"type": "array", "items": {"type": "string"},
+                       "description": "규격약호 필터. 압연은 'roll:코드', 정정은 'fin:코드' (태그 없으면 고른 기준 모두에서 찾음)"},
              "coil_pos": {"type": "string", "enum": list(ds.COIL_POS), "description": "시편 위치 필터"}}),
         _fn("query_coils", "조건별 코일 건수, 판정·결함 분포, 재질 요약을 조회한다.",
             {"grade": grade, "line": line, "start_date": date, "end_date": date,
@@ -71,7 +85,11 @@ def tool_schemas() -> list[dict]:
             "차이 크기(효과크기) 순위, 표준조건 대비, 지식베이스 메커니즘 일치 여부, 비교 조건 차이(두께·라인·시편 위치)를 반환한다.",
             {"grade": grade, "target_property": props, "line": line,
              "start_date": date, "end_date": date, "baseline_start": date, "baseline_end": date,
-             "side": {"type": "string", "enum": list(ds.SIDES)}}, ["grade", "target_property"]),
+             "side": {"type": "string", "enum": list(ds.SIDES)},
+             "model": {"type": "string", "enum": list(MODELS), "description": "원인 순위 모델. 없으면 effect(차이 크기)"},
+             "sigma": {"type": "number", "minimum": 0.5, "maximum": 3.0,
+                       "description": "전체 기간일 때 문제 코일 기준 σ 수준 (기본 1.0). 대시보드 상태의 sigma를 넘기세요"}},
+            ["grade", "target_property"]),
         _fn("trace_defect", "표면결함 발생률을 기간별로 비교하고 원인 인자를 순위화한다.",
             {"defect_type": {"type": "string", "enum": list(DEFECTS)}, "grade": grade, "line": line,
              "start_date": date, "end_date": date}, ["defect_type"]),

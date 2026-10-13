@@ -1,6 +1,5 @@
 openai>=3.20
 streamlit>=1.40
-streamlit-aggrid>=1.2
 pandas>=2.2
 numpy>=2.0
 scipy>=1.13
@@ -8,3 +7,9 @@ plotly>=5.24
 openpyxl>=3.1
 python-dotenv>=1.0
 pytest>=8.0
+scikit-learn>=1.5
+python-pptx>=1.0
+matplotlib>=3.9
+# AI 모드에서 Claude·Gemini를 쓸 때만 (선택): pip install anthropic google-genai
+# anthropic>=1.0
+# google-genai>=1.0

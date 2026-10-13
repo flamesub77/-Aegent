@@ -10,8 +10,8 @@ from pathlib import Path
 import pandas as pd
 
 import config
-from tools import db
-from tools.datasource import REQUIRED, DataSource
+from tools import db, pds
+from tools.datasource import REQUIRED, DataSource, base_grades
 from tools.domain import FACTORS
 
 ELEMENTS = ["C", "Mn", "Si", "P", "S", "N", "Al", "Ti", "Nb", "B"]
@@ -37,24 +37,24 @@ MATERIALS = ["YS", "TS", "EL", "BH", "r0", "r45", "r90", "n_value"]
 
 # 사내 표기 → 표준 컬럼 (정규화한 이름으로 비교: 소문자, 공백·기호 제거)
 ALIASES = {
-    "coil_no": ["코일번호", "냉연코일번호", "냉연코일no", "코일no", "coilno", "coil", "냉연번호", "제품번호"],
+    "coil_no": ["냉연코일번호", "냉연코일no", "코일번호", "코일no", "coilno", "coil", "냉연번호", "제품번호"],
     "hot_coil_no": ["열연코일번호", "열연코일no", "열연번호", "hotcoilno", "hrcoilno", "모코일번호"],
-    "slab_no": ["슬라브번호", "슬라브no", "slabno", "slab"],
-    "heat_no": ["히트번호", "히트no", "heatno", "heat", "용강번호", "차지번호", "charge"],
+    "slab_no": ["슬라브번호", "슬라브no", "slab번호", "slabno", "slab"],
+    "heat_no": ["히트번호", "히트no", "heat번호", "heatno", "heat", "용강번호", "차지번호", "charge"],
     "prod_date": ["생산일", "생산일자", "소둔일", "소둔일자", "작업일", "작업일자", "date", "proddate", "생산일시"],
-    "grade": ["강종", "강종코드", "강종명", "grade", "steelgrade", "규격"],
+    "grade": ["강종", "강종코드", "강종명", "grade", "steelgrade", "냉연규격", "규격"],
     "line": ["라인", "소둔라인", "line", "공장", "설비"],
     "trial_flag": ["시생산", "시생산여부", "시작품", "trial", "trialflag", "생산구분"],
-    "cast_speed": ["주조속도", "연주속도", "castspeed"], "superheat": ["과열도", "superheat"],
+    "cast_speed": ["주조속도", "연주속도", "castspeed", "주속"], "superheat": ["과열도", "superheat"],
     "SRT": ["재가열온도", "추출온도", "srt", "sdt"], "FDT": ["마무리온도", "사상출측온도", "fdt", "fet"],
     "CT": ["권취온도", "ct", "coilingtemp"], "descale_press": ["디스케일링압력", "디스케일압력"],
     "hot_thk": ["열연두께", "모재두께", "hotthk"], "pickle_speed": ["산세속도"], "hcl_conc": ["염산농도", "hcl농도", "hcl"],
     "RED": ["압하율", "냉간압하율", "냉연압하율", "red", "reduction"],
-    "SS": ["균열온도", "소둔온도", "ss", "soaking"], "line_speed": ["라인속도", "통판속도", "소둔속도"],
-    "OA": ["과시효온도", "oa", "과시효"], "pot_temp": ["도금욕온도", "포트온도", "pot"],
-    "GA_temp": ["합금화온도", "ga온도", "gatemp"], "SPM": ["spm", "spm연신율", "조질연신율", "skp", "skinpass"],
+    "SS": ["균열온도", "소둔온도", "ss", "soaking"], "line_speed": ["라인속도", "통판속도", "소둔속도", "라인스피드"],
+    "OA": ["과시효온도", "oa", "과시효", "oas"], "pot_temp": ["도금욕온도", "포트온도", "pot"],
+    "GA_temp": ["합금화온도", "ga온도", "gatemp"], "SPM": ["spm", "spm연신율", "조질연신율", "skp", "skinpass", "spmel"],
     "thk": ["두께", "제품두께", "thk", "thickness"], "width": ["폭", "제품폭", "width"],
-    "coil_pos": ["시험위치", "채취위치", "시편위치", "coilpos"],
+    "coil_pos": ["시험위치", "채취위치", "시편위치", "시편채취위치", "coilpos"],
     "YS": ["항복강도", "ys", "yp", "항복점"], "TS": ["인장강도", "ts"], "EL": ["연신율", "el", "elongation"],
     "YR": ["항복비", "yr"], "BH": ["bh", "소부경화", "소부경화량"],
     "r0": ["r0", "r값0", "r0도"], "r45": ["r45", "r값45", "r45도"], "r90": ["r90", "r값90", "r90도"],
@@ -64,6 +64,7 @@ ALIASES = {
 }
 for el in ELEMENTS:
     ALIASES[el] = [el.lower()]
+ALIASES["Al"].append("solal")
 
 
 def _norm(name: str) -> str:
@@ -71,6 +72,8 @@ def _norm(name: str) -> str:
 
 
 _ALIAS_INDEX = {_norm(a): std for std, names in ALIASES.items() for a in names + [std]}
+# 같은 표준 컬럼 후보가 여럿이면 목록 앞쪽 별칭(더 구체적인 이름)을 고른다
+_ALIAS_RANK = {_norm(a): i for std, names in ALIASES.items() for i, a in enumerate(names + [std])}
 
 
 # ---------------------------------------------------------------------------
@@ -90,16 +93,23 @@ def read_file(data: bytes, filename: str, sheet: str | None = None) -> tuple[pd.
 
 
 def suggest_mapping(columns) -> dict:
-    """원본 컬럼 → 표준 컬럼 제안. 못 찾으면 None. 한 표준 컬럼에는 하나만."""
-    out, used = {}, set()
-    for col in columns:
-        std = _ALIAS_INDEX.get(_norm(col))
-        if std and std not in used:
-            out[col], _ = std, used.add(std)
-        else:
-            out[col] = None
-    return out
+    """원본 컬럼 → 표준 컬럼 제안. 못 찾으면 None. 한 표준 컬럼에는 하나만.
 
+    사내 양식은 제강→연주→열연→냉연 순으로 같은 이름의 열(두께, YP 등)이 반복되고, pandas는 뒤의 것을
+    "두께.1"처럼 읽는다. 이 경우 제품(냉연) 값인 마지막 열을 고른다. 별칭이 여럿 맞으면 더 구체적인 이름 우선.
+    """
+    columns = list(columns)
+    best = {}  # std → (별칭 순위, -열 위치, 원본 컬럼)
+    for pos, col in enumerate(columns):
+        key = _norm(re.sub(r"\.\d+$", "", str(col)))
+        std = _ALIAS_INDEX.get(key)
+        if std is None:
+            continue
+        cand = (_ALIAS_RANK[key], -pos, col)
+        if std not in best or cand < best[std]:
+            best[std] = cand
+    chosen = {v[2]: std for std, v in best.items()}
+    return {col: chosen.get(col) for col in columns}
 
 def apply_mapping(df: pd.DataFrame, mapping: dict, ppm_columns=()) -> pd.DataFrame:
     """매핑된 컬럼만 표준 이름으로 남긴다. ppm_columns의 성분은 wt%로 바꾼다."""
@@ -161,6 +171,11 @@ def validate(df: pd.DataFrame, raw: pd.DataFrame | None = None, mapping: dict | 
             bad_rows |= dup
             issues.append({"code": "duplicate", "level": "warn", "count": int(dup.sum()),
                            "text": "중복된 코일번호 (첫 행만 남김)", "examples": df.loc[dup, "coil_no"].astype(str).head(3).tolist()})
+    for col in df.columns:  # 결측이 많은 열은 알리기만 한다 (prd_v3 D3)
+        rate = df[col].isna().mean() if len(df) else 0
+        if col not in REQUIRED and rate >= 0.5:
+            issues.append({"code": "many_missing", "level": "info", "count": int(df[col].isna().sum()),
+                           "text": f"{col} 값이 {rate:.0%} 비어 있음 (있는 값만 분석)"})
     if grades is not None and "grade" in df.columns:
         no_spec = sorted(set(df["grade"].dropna()) - set(grades["grade"]))
         if no_spec:
@@ -172,13 +187,18 @@ def validate(df: pd.DataFrame, raw: pd.DataFrame | None = None, mapping: dict | 
 
 def build_source(df: pd.DataFrame, name: str, grades: pd.DataFrame | None = None,
                  use_sample_spec: bool = True, drop_bad: pd.Series | None = None) -> DataSource:
-    """검증한 DataFrame으로 DataSource를 만든다. grades가 없으면 샘플 스펙(같은 강종 코드만) 사용."""
+    """검증한 DataFrame으로 DataSource를 만든다. grades가 없으면 샘플 스펙(같은 강종 코드만) 사용.
+
+    pds 양식처럼 코일마다 SPEC·지시값이 있으면 그것을 강종 단위로 모아 우선 쓴다.
+    """
     if drop_bad is not None:
         df = df[~drop_bad]
     df = df.drop_duplicates("coil_no", keep="first")
     if grades is None:
-        grades = db.load_grade_master() if use_sample_spec else pd.DataFrame(columns=["grade"])
-        grades = grades[grades["grade"].isin(df["grade"].unique())]
+        base = base_grades() if use_sample_spec else pd.DataFrame(columns=["grade"])
+        base = base[base["grade"].isin(df["grade"].unique())]
+        has_spec = any(c.startswith("spec_") and c.endswith(("_lo", "_hi")) for c in df.columns)
+        grades = pds.grade_table(df, base) if has_spec else base
     return DataSource(df, grades, name, "upload")
 
 
@@ -202,7 +222,7 @@ def template_excel() -> bytes:
     return buf.getvalue()
 
 
-MAPPING_DIR = config.BASE_DIR / "mappings"
+MAPPING_DIR = config.USER_DIR / "mappings"  # 사용자 폴더 (패키지 폴더에 쓰지 않는다)
 
 
 def save_mapping(name: str, mapping: dict, ppm_columns=()) -> Path:

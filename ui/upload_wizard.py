@@ -7,8 +7,10 @@ import hashlib
 import pandas as pd
 import streamlit as st
 
+from tools import pds
 from tools import upload as U
 from tools.datasource import REQUIRED, sample_source
+from ui import datasets
 
 SKIP = "(사용 안 함)"
 OPTIONS = [SKIP] + [f"{c} · {d}" for c, (d, _, _) in U.STANDARD.items()]
@@ -24,19 +26,19 @@ def _read(data: bytes, name: str, sheet):
     return U.read_file(data, name, sheet)
 
 
-def apply_source(src, name: str):
-    st.session_state["upload_source"] = src
-    st.session_state["source_key"] = f"upload:{name}:{len(src.coils)}:{hashlib.md5(name.encode()).hexdigest()[:6]}"
+def apply_source(src, name: str, keep: bool = False):
+    """올린 파일을 데이터 파일 목록에 넣고 바로 전환 (prd_v4 L3)."""
+    datasets.register(src, name, keep)
     st.session_state["ext_ok"] = False  # 새 파일은 외부 전송을 다시 확인받는다
 
 
-def use_sample():
-    st.session_state.pop("upload_source", None)
-    st.session_state["source_key"] = "sample"
-    st.session_state["upload_msg"] = ("ok", "샘플 데이터로 돌아왔습니다.")
+def keep_checkbox(key: str) -> bool:
+    return st.checkbox("이 PC에 보관 (앱을 다시 켜도 목록에 남김)", value=False, key=key,
+                       help="켜면 표준 형식으로 사용자 폴더(~/.steel_dashboard/datasets)에 저장해요. 외부로는 보내지 않아요. "
+                            "끄면 앱이 켜져 있는 동안만 목록에 있어요.")
 
 
-@st.dialog("내 파일 불러오기", width="large")
+@st.dialog("새 파일 올리기", width="large")
 def upload_dialog():
     st.markdown("#### ① 파일 선택")
     f = st.file_uploader("코일 데이터 (CSV / Excel)", type=["csv", "xlsx", "xls"], key="wz_file",
@@ -55,6 +57,9 @@ def upload_dialog():
         st.error(f"파일을 읽지 못했습니다: {e}")
         return
     st.caption(f"{f.name} · {len(raw):,}행 × {len(raw.columns)}열")
+    if pds.is_pds(raw.columns):  # 회사 양식이면 매핑 없이 바로 검증 (prd_v3 D1)
+        _pds_flow(f, raw)
+        return
 
     st.markdown("#### ② 컬럼 매핑")
     file_id = hashlib.md5(f.getvalue()[:4096] + f.name.encode()).hexdigest()[:8]
@@ -118,6 +123,7 @@ def upload_dialog():
     missing = [c for c in REQUIRED if c not in mapping.values()]
     if missing:
         st.info("필수 컬럼을 먼저 연결하세요: " + ", ".join(U.STANDARD[c][0] for c in missing))
+    keep = keep_checkbox(f"wz_keep_{file_id}")
     if st.button("이 데이터로 분석하기", type="primary", disabled=not rep["ok"], width="stretch"):
         try:
             src = U.build_source(df, f.name, grades=grades, use_sample_spec=False,
@@ -125,7 +131,33 @@ def upload_dialog():
         except ValueError as e:
             st.error(str(e))
             return
-        apply_source(src, f.name)
+        apply_source(src, f.name, keep)
         st.session_state["upload_msg"] = ("ok", f"{f.name} · {len(src.coils):,}코일 적용"
                                                 + (f" (문제 행 {rep['bad_rows']}개 제외)" if drop and rep["bad_rows"] else ""))
+        st.rerun()
+
+
+def _pds_flow(f, raw: pd.DataFrame):
+    """회사 양식(coil data(pds).xlsx): 공정 블록 위치로 읽고, 코일별 SPEC·지시값을 그대로 쓴다."""
+    st.markdown("#### ② 컬럼 매핑")
+    st.success("회사 양식(제강 → 연주 → 열연 → 냉연)으로 인식했어요. 매핑 없이 바로 읽어요.", icon=":material/task_alt:")
+    df = pds.standardize(raw)
+    st.caption(f"읽은 항목 {len(df.columns)}개 · 재질·SPEC·제품 값은 냉연 블록에서, 양식에 없는 항목은 맨 뒤 추가 열에서 읽어요.")
+    st.markdown("#### ③ 검증")
+    rep = U.validate(df)
+    if rep["issues"]:
+        st.dataframe(pd.DataFrame([{"구분": LEVEL_ICON[i["level"]], "내용": i["text"], "건수": i["count"],
+                                    "예시": ", ".join(map(str, i.get("examples", [])))} for i in rep["issues"]]),
+                     hide_index=True, width="stretch", height=220)
+    else:
+        st.success("문제가 없습니다.")
+    drop = st.checkbox(f"문제 행 {rep['bad_rows']}개 제외하고 적용", value=True, key="wz_pds_drop",
+                       disabled=rep["bad_rows"] == 0)
+    st.markdown("#### ④ 적용")
+    keep = keep_checkbox("wz_pds_keep")
+    if st.button("이 데이터로 분석하기", type="primary", disabled=not rep["ok"], width="stretch", key="wz_pds_apply"):
+        src = U.build_source(df, f.name, drop_bad=rep["bad_mask"] if drop else None)
+        apply_source(src, f.name, keep)
+        st.session_state["upload_msg"] = ("ok", f"{f.name} · {len(src.coils):,}코일 적용 (회사 양식)"
+                                                + (f", 문제 행 {rep['bad_rows']}개 제외" if drop and rep["bad_rows"] else ""))
         st.rerun()

@@ -1,0 +1,47 @@
+# PC마다 설치하는 파이썬 패키지 (prd_v3 배포). 빌드: python -m pip wheel . --no-deps -w dist
+# 설치: pip install dist/steel_quality_dashboard-*.whl  →  실행: steel-dashboard
+# 평가용 정답 파일(anomaly_scenarios.md, answer_key.csv, trial_key.csv, generate_data.py)과 테스트는 넣지 않는다.
+# 글꼴: static/HDharmony-*.ttf (현대하모니, 사내 글꼴 라이선스는 배포 전 확인). files/의 한글 이름 원본은 넣지 않는다.
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "steel-quality-dashboard"
+version = "5.0.0"
+description = "강종 품질 현황 대시보드 + AI 분석 도우미 (냉연강판 재질 편차·원인 분석)"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.40", "streamlit>=1.50", "pandas>=2.2", "numpy>=2.0", "scipy>=1.13",
+    "plotly>=5.24", "openpyxl>=3.1", "python-dotenv>=1.0", "scikit-learn>=1.5", "python-pptx>=1.0", "matplotlib>=3.9",
+]
+
+[project.optional-dependencies]
+# AI 모드에서 Claude·Gemini를 쓸 때만 (prd_v5 H3). 없으면 그 제공자만 쓸 수 없고 앱은 그대로 뜬다
+ai = ["anthropic>=1.0", "google-genai>=1.0"]
+
+[project.scripts]
+steel-dashboard = "steel_dashboard.launcher:main"
+
+[tool.setuptools]
+# 코드는 평평한 폴더 구조 그대로 두고, 설치할 때만 steel_dashboard 패키지 하나로 묶는다 (launcher가 그 폴더에서 실행)
+packages = ["steel_dashboard", "steel_dashboard.agent", "steel_dashboard.agent.providers", "steel_dashboard.tools",
+            "steel_dashboard.ui"]
+include-package-data = false
+
+[tool.setuptools.package-dir]
+steel_dashboard = "."
+"steel_dashboard.agent" = "agent"
+"steel_dashboard.agent.providers" = "agent/providers"
+"steel_dashboard.tools" = "tools"
+"steel_dashboard.ui" = "ui"
+
+[tool.setuptools.package-data]
+steel_dashboard = [
+    ".streamlit/config.toml", ".env.example", "static/HDharmony-L.ttf", "static/HDharmony-M.ttf", "static/HDharmony-B.ttf",
+    "files/coil data(pds).xlsx", "files/steel.db", "files/grade_master.csv", "files/grade_family.csv", "files/use_codes.csv",
+    "files/knowledge_base.md", "files/PPT 양식.pptx",
+]
+
+[tool.setuptools.exclude-package-data]
+steel_dashboard = ["files/anomaly_scenarios.md", "files/answer_key.csv", "files/trial_key.csv", "files/generate_data.py"]

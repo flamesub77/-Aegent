@@ -1,0 +1,14 @@
+﻿grade,family,grade_name
+IF270_IN,IF,"극저탄 내판 (Ti 단독 IF, 270E급)"
+IF340_OUT,IF_HS,"고강도 극저탄 외판 (Ti-Nb 복합 P첨가 IF, 340급)"
+BH340_OUT,BH,"BH 외판 (극저탄 Nb 부분안정화 BH, 340급)"
+LC340,LC,저탄 고용강화강 340급 (Ti/Nb 미첨가)
+LC440R,LC,저탄 고용강화강 440급 (Ti/Nb 미첨가)
+HSLA590C,HSLA,석출경화강 590급 (Nb 단독계 HSLA)
+IF260_IN,IF,극저탄 내판 260급
+BH180_OUT,BH,BH 외판 180급
+HSLA440,HSLA,석출경화강 440급
+DP590,DP,복합조직(DP)강 590급
+DP780,DP,복합조직(DP)강 780급
+TRIP780,TRIP,변태유기소성(TRIP)강 780급
+MART1180,MART,마르텐사이트(MART)강 1180급

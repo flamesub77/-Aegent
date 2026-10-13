@@ -2,11 +2,11 @@
 import json
 
 VIEW_CHARTS = {
-    "재질 편차": ["강종×월 편차 히트맵", "분포 히스토그램", "월별 박스플롯"],
-    "원인 분석": ["인자 기여도", "원인 인자 산점도", "인자 일별 추이", "교란 요인 구성비"],
-    "표면결함": ["월별 결함 발생률", "결함 원인 인자"],
-    "코일 단건 분석": ["양산 대비 재질 위치", "양산 대비 공정 차이"],
-    "Raw Data": ["코일 원천 데이터 표"],
+    "재질개요": ["생산량", "분포 히스토그램", "월별 박스플롯", "조기 감시", "두께별 재질"],
+    "공정분석": ["원인 가능성 순위", "원인 인자 산점도", "인자 일별 추이", "비교 조건 차이 구성비"],
+    "결함분석": ["결함 유형 순위", "강종별 결함 비교", "월별 결함 발생률", "결함 원인 인자"],
+    "코일분석": ["양산 대비 재질 위치", "양산 대비 공정 차이"],
+    "데이터": ["코일 데이터 표"],
 }
 
 
@@ -53,6 +53,8 @@ def build_report(calls, text: str, state: dict | None) -> dict:
                             "top_factors": [{"factor": f["factor"], "label": f["label"], "z": f["z"]}
                                             for f in c["top_factors"][:3]]} for c in coil["coils"]]
     if state:
-        report["charts"] = VIEW_CHARTS.get(state.get("view"), [])
+        from tools.dashboard_state import VIEW_ALIASES
+        view = state.get("view")
+        report["charts"] = VIEW_CHARTS.get(VIEW_ALIASES.get(view, view), [])
     report["warnings"] = list(dict.fromkeys(report["warnings"]))
     return report

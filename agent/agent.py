@@ -1,4 +1,4 @@
-"""OpenAI Responses API function calling 에이전트 루프."""
+"""OpenAI Responses API function calling 에이전트 루프 (Claude·Gemini는 agent/providers/)."""
 import json
 from dataclasses import dataclass, field
 
@@ -31,15 +31,16 @@ class AgentResult:
             self.report = build_report(self.tool_calls, self.text, self.state)
 
 
-def _create(client, items, instructions, tools):
-    kwargs = dict(model=config.MODEL, instructions=instructions, input=items, tools=tools,
+def _create(client, items, instructions, tools, model=None):
+    kwargs = dict(model=model or config.MODEL, instructions=instructions, input=items, tools=tools,
                   max_output_tokens=config.MAX_TOKENS)
     if config.REASONING_EFFORT:
         kwargs["reasoning"] = {"effort": config.REASONING_EFFORT}
     return client.responses.create(**kwargs)
 
 
-def run_agent(question: str, state: dict, history: list | None = None, client=None, on_tool=None) -> AgentResult:
+def run_agent(question: str, state: dict, history: list | None = None, client=None, on_tool=None,
+              model: str | None = None) -> AgentResult:
     """질문과 현재 대시보드 상태를 받아 도구 호출을 반복한 뒤 답변과 바뀐 상태를 반환한다.
 
     history: 이전 대화의 [{"role": "user"|"assistant", "content": str}, ...]
@@ -49,7 +50,7 @@ def run_agent(question: str, state: dict, history: list | None = None, client=No
         from openai import OpenAI  # openai 미설치 PC에서도 앱이 뜨도록 필요할 때만 불러온다
         client = OpenAI()
     ctx = DashboardContext(state)
-    instructions = build_system_prompt(state.get("style", "easy"))
+    instructions = build_system_prompt()
     tools = tool_schemas()
     items = list(history or []) + [{
         "role": "user",
@@ -57,7 +58,7 @@ def run_agent(question: str, state: dict, history: list | None = None, client=No
     calls: list[ToolCall] = []
 
     for _ in range(config.MAX_AGENT_TURNS):
-        response = _create(client, items, instructions, tools)
+        response = _create(client, items, instructions, tools, model)
         fcalls = [o for o in response.output if o.type == "function_call"]
         if not fcalls:
             text = response.output_text or ""
