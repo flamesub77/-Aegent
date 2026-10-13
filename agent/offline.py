@@ -35,7 +35,7 @@ FACTOR_ALIASES = [
     (r"산세\s*속도", "pickle_speed"), (r"염산|hcl", "hcl_conc"), (r"과열도", "superheat"),
 ]
 VIEW_ALIASES = [(r"raw|원본|원천|데이터\s*표|엑셀", "데이터"), (r"원인|왜|이유|때문", "공정분석"),
-                (r"분포|편차|히스토그램|추이|현황|생산량|개요", "재질개요")]
+                (r"분포|편차|히스토그램|추이|현황|생산량|개요", "강종개요")]
 MODEL_ALIASES = [(r"랜덤\s*포레스트|random\s*forest|\brf\b", "rf"), (r"부스팅|gbm|boost", "gbm"),
                  (r"회귀|lasso|라쏘", "lasso"), (r"상관|spearman", "spearman"), (r"차이\s*크기|효과\s*크기", "effect")]
 ID_WORDS = [(r"열연\s*코일|열연", "hot_coil_no"), (r"슬라브|slab", "slab_no"), (r"히트|heat|차지", "heat_no")]
@@ -130,7 +130,7 @@ def parse_question(text: str, state: dict) -> tuple[dict, list[str]]:
     m = re.search(r"(\d(?:\.\d)?)\s*(?:시그마|σ|sigma)", q, re.I)
     if m:
         ch["sigma"] = float(m.group(1))
-        seen.append(f"문제 코일 기준 {float(m.group(1)):.1f}σ")
+        seen.append(f"불량 코일 기준 {float(m.group(1)):.1f}σ")
     if "prop" in ch:  # 질문한 재질을 화면 재질 체크에도
         ch.setdefault("props", [ch["prop"]])
     if re.search(r"낮|떨어|하락|미달|저하", q):

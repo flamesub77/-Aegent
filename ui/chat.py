@@ -9,7 +9,7 @@ from datetime import datetime
 import streamlit as st
 
 import config
-from agent import offline, router
+from agent import offline, providers, router
 from tools.datasource import get_source
 from ui import ai as AI
 from ui.common import STEP_LABEL, badge
@@ -217,6 +217,9 @@ def _answer(question: str, state: dict, mode: str, api_key: str | None, box):
 
             try:
                 result, used_mode, notice = router.answer(question, state, history, mode, on_tool, **AI.kwargs())
+                if providers.is_auth_error(notice):  # 거부된 키는 기억해 키 오류로 보여주고 다음부터 오프라인으로
+                    AI.mark_rejected()
+                    notice += " 🔑에서 새 키를 넣으세요."
             except Exception as e:  # 예상 못 한 오류도 대화에 문장으로 남긴다 (키는 메시지에 넣지 않는다)
                 status.update(label="분석 실패", state="error", expanded=False)
                 st.session_state.chat.append({"role": "assistant", "error": True,

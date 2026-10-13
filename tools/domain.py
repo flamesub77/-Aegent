@@ -5,13 +5,18 @@
 """
 
 # 내부 코드는 v1 호환으로 YS, 화면 표기는 회사 양식대로 YP (prd_v3 W). Δr은 v3에서 삭제 (D2)
-PROPS = ["YS", "TS", "EL", "BH", "rbar", "n_value"]
+# 재질 고정 순서 (prd_v6 K1·M3): YP · TS · EL · n · r0 · r45 · r90 · r̄ · BH. r0·r45·r90은 표시용 (SPEC 없음)
+PROPS = ["YS", "TS", "EL", "n_value", "r0", "r45", "r90", "rbar", "BH"]
+PROP_ORDER = PROPS
 PROP_LABEL = {"YS": "항복강도 YP", "TS": "인장강도 TS", "EL": "연신율 EL", "BH": "소부경화량 BH",
-              "rbar": "평균 r값 r̄", "n_value": "가공경화지수 n"}
-PROP_SHORT = {"YS": "YP", "TS": "TS", "EL": "EL", "BH": "BH", "rbar": "r̄", "n_value": "n"}
-PROP_UNIT = {"YS": "MPa", "TS": "MPa", "EL": "%", "BH": "MPa", "rbar": "-", "n_value": "-"}
+              "rbar": "평균 r값 r̄", "n_value": "가공경화지수 n", "r0": "r값 0° r0", "r45": "r값 45° r45",
+              "r90": "r값 90° r90"}
+PROP_SHORT = {"YS": "YP", "TS": "TS", "EL": "EL", "BH": "BH", "rbar": "r̄", "n_value": "n", "r0": "r0", "r45": "r45",
+              "r90": "r90"}
+PROP_UNIT = {"YS": "MPa", "TS": "MPa", "EL": "%", "BH": "MPa", "rbar": "-", "n_value": "-", "r0": "-", "r45": "-",
+             "r90": "-"}
 # 성형성 지표: 값이 작아서 소수점 자릿수가 다르다
-PROP_DECIMALS = {"YS": 1, "TS": 1, "EL": 1, "BH": 1, "rbar": 3, "n_value": 3}
+PROP_DECIMALS = {"YS": 1, "TS": 1, "EL": 1, "BH": 1, "rbar": 3, "n_value": 3, "r0": 2, "r45": 2, "r90": 2}
 
 FACTORS = {
     # 이름: (한글명, 단위, 공정)

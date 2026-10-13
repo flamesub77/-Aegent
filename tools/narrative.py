@@ -276,7 +276,7 @@ def note_thickness(tg: pd.DataFrame, prop: str) -> tuple[str, list[str]]:
         return f"두께 구간별 {short}", ["두께 값이 있는 코일이 없어요"]
     if tg["spec_rate"].notna().any():
         w = tg.loc[tg["spec_rate"].idxmin()]
-        title = f"{band_text(w['band'])} {short} 만족률 {w['spec_rate']}% (최저)"
+        title = f"{band_text(w['band'])} {short} 불량률 {round(100 - w['spec_rate'], 1):g}% (최고)"
         if w["spec_rate"] < 95:
             title = "⚠️ " + title
     else:
@@ -372,3 +372,50 @@ def note_defect_compare(rows: pd.DataFrame, defect: str, grade: str) -> tuple[st
     ratio = r["rate"] / avg if avg else 0
     title = f"{grade} {defect} {r['rate']:.2f}% · {len(rows)}개 강종 중 {rank}위" + (" 🔺" if ratio >= 1.5 else "")
     return title, [f"평균 {avg:.2f}%의 {ratio:.1f}배 · 최다 {top['grade']} {top['rate']:.2f}%"]
+
+
+
+# ---------------------------------------------------------------------------
+# prd_v6: 스펙 불량률 · 두께별/용도별 생산량
+# ---------------------------------------------------------------------------
+def note_defect_dist(target: pd.DataFrame, baseline: pd.DataFrame | None, prop: str, spec) -> tuple[str, list[str]]:
+    """재질 분포 카드 (불량률 기준): "TS 불량률 0.4% (3/617코일)" + 평균·나머지 기간 대비 변화."""
+    from tools.analysis import defect_rate
+    short, nd, u = PROP_SHORT[prop], PROP_DECIMALS.get(prop, 1), _u(PROP_UNIT[prop])
+    lo, hi = spec
+    rate, bad, n = defect_rate(target[prop], lo, hi) if prop in target else (None, 0, 0)
+    mean = target[prop].mean() if prop in target else None
+    if rate is None:
+        return f"{short} 평균 {_num(mean, nd)}{u} (SPEC 없음)", [f"코일 {n:,}개 · 표준편차 {_num(target[prop].std(), nd + 1)}"]
+    title = f"{short} 불량률 {rate:g}% ({bad:,}/{n:,}코일)" + (" ⚠️" if rate >= 5 else "")
+    line = f"평균 {_num(mean, nd)}{u}"
+    if baseline is not None and len(baseline):
+        b_rate, _, b_n = defect_rate(baseline[prop], lo, hi)
+        if b_rate is not None and b_n:
+            arrow = "🔺" if rate > b_rate else "🔻" if rate < b_rate else "→"
+            line += f" · 나머지 기간 {b_rate:g}% → 이 기간 {rate:g}% {arrow}"
+    return title, [line]
+
+
+def note_production_by(rows: pd.DataFrame, what: str) -> tuple[str, list[str]]:
+    """두께별·용도별 생산량 카드."""
+    if rows.empty:
+        return f"{what}별 생산량", []
+    top = rows.loc[rows["coils"].idxmax()]
+    label = band_text(top["label"]) if what == "두께" else top["label"]
+    return (f"{what}별 생산량: {label} 최다 {top['share']:.0f}%",
+            [" · ".join(f"{band_text(r['label']) if what == '두께' else r['key']} {int(r['coils']):,}" for _, r in rows.head(5).iterrows())])
+
+
+
+def note_process_ts(df: pd.DataFrame, factor: str, aim=None, label: str | None = None) -> tuple[str, list[str]]:
+    """공정 조건 시계열 카드: 제목 = 평균(지시 대비), 한 줄 = 최근 30일 vs 전체."""
+    name, unit = label or factor_label(factor), factor_unit(factor)
+    if factor not in df or df[factor].notna().sum() < 3:
+        return f"{name} 시계열 (값 없음)", ["이 조건에는 값이 없어요"]
+    v = df[factor].dropna()
+    title = f"{name} 평균 {_fv(v.mean(), unit)}{unit}" + (f" (지시 {_fd(v.mean() - aim, unit)})" if aim is not None else "")
+    dates = pd.to_datetime(df.loc[v.index, "prod_date"])
+    recent = v[dates >= dates.max() - pd.Timedelta(days=30)]
+    line = f"최근 30일 평균 {_fv(recent.mean(), unit)}{unit} (전체 대비 {_fd(recent.mean() - v.mean(), unit)}) · σ {v.std():.3g}"
+    return title, [line]

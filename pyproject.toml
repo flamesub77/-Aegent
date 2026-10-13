@@ -12,7 +12,7 @@ version = "5.0.0"
 description = "강종 품질 현황 대시보드 + AI 분석 도우미 (냉연강판 재질 편차·원인 분석)"
 requires-python = ">=3.10"
 dependencies = [
-    "openai>=1.40", "streamlit>=1.50", "pandas>=2.2", "numpy>=2.0", "scipy>=1.13",
+    "openai>=1.40", "streamlit>=1.50", "streamlit-aggrid>=1.2", "pandas>=2.2", "numpy>=2.0", "scipy>=1.13",
     "plotly>=5.24", "openpyxl>=3.1", "python-dotenv>=1.0", "scikit-learn>=1.5", "python-pptx>=1.0", "matplotlib>=3.9",
 ]
 

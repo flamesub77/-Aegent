@@ -105,7 +105,7 @@ def test_ppt_report_three_slides_inside_panels():
     from tools import report_ppt as R
     ctx = _report_ctx()
     keys = ["summary", "distribution", "thickness", "spc", "ranking", "scatter"]
-    assert R.check_count(len(keys)) is None and R.check_count(3) and R.check_count(7)
+    assert R.check_count(len(keys)) is None and R.check_count(0) and R.check_count(10) is None  # 장수 제한 없음
     assert set(keys) <= set(R.available(ctx))
     pages = R.pages(keys, ctx)
     assert len(pages) == 3 and pages[0]["title"].startswith("HSLA590C 품질 분석")

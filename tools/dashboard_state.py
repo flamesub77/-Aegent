@@ -2,22 +2,23 @@
 
 강종·라인·기간·코드 목록은 현재 데이터 소스에서 읽는다 (업로드 데이터면 그 데이터 기준).
 v3 (prd_v3 U1): 출강목표·용도코드·공장 복수 선택, 두께 최소~최대, 원인 순위 모델.
-v5 (prd_v5): 탭 이름 재질개요·공정분석·결함분석·코일분석·데이터 (옛 이름 호환), 재질 기본 YP·TS·EL.
+v8 (prd_v8): 탭 이름 재질개요 → 강종개요. v5 (prd_v5): 탭 이름 재질개요·공정분석·결함분석·코일분석·데이터 (옛 이름 호환), 재질 기본 YP·TS·EL.
 v4 (prd_v4): 재질 복수 선택 props(빈 목록 = TS) + 분석 재질 prop, 규격약호 압연·정정 함께(spec_cols, 값은 "roll:코드"),
-문제 코일 σ 수준 sigma(기본 1.0), 표면결함 범위 defect_scope(grade/all).
+불량 코일 σ 수준 sigma(기본 1.0), 표면결함 범위 defect_scope(grade/all).
 """
 from datetime import date
 
 from tools.coil_lookup import ID_TYPES
 from tools.datasource import get_source
 from tools.domain import DEFECTS, FACTORS, PROPS
-from tools.ranking import DEFAULT as DEFAULT_MODEL
+from tools.ranking import START as DEFAULT_MODEL
 from tools.ranking import MODELS
 
-VIEWS = ["재질개요", "공정분석", "결함분석", "코일분석", "데이터"]  # prd_v5 T1
-VIEW_ICON = {"재질개요": "📊", "공정분석": "⚙️", "결함분석": "🧩", "코일분석": "🔬", "데이터": "🗂"}  # prd_v5 C2
+VIEWS = ["강종개요", "공정분석", "결함분석", "코일분석", "데이터"]  # prd_v5 T1
+VIEW_ICON = {"강종개요": ":material/bar_chart:", "공정분석": ":material/settings:", "결함분석": ":material/extension:",
+             "코일분석": ":material/biotech:", "데이터": ":material/description:"}  # 시안 아이콘 (prd_v8 U2)
 # 옛 이름(v2~v4)도 받는다: 링크·즐겨찾기 호환 (prd_v5 C4)
-VIEW_ALIASES = {"재질 현황": "재질개요", "재질 편차": "재질개요", "원인 분석": "공정분석", "표면결함": "결함분석",
+VIEW_ALIASES = {"재질개요": "강종개요", "재질 현황": "강종개요", "재질 편차": "강종개요", "원인 분석": "공정분석", "표면결함": "결함분석",
                 "단일 코일 분석": "코일분석", "코일 단건 분석": "코일분석", "Raw Data": "데이터"}
 SIDES = {"auto": "자동", "low": "낮은 쪽", "high": "높은 쪽"}
 PREFERRED_GRADE = "HSLA590C"
@@ -27,6 +28,7 @@ SPEC_TAG_LABEL = {"roll": "압연", "fin": "정정"}
 DEFAULT_PROP = "TS"  # 재질을 아무것도 고르지 않았을 때 (prd_v4 L5)
 DEFAULT_PROPS = ["YS", "TS", "EL"]  # 재질 체크박스 기본 (prd_v5 T2)
 SIGMAS = [round(0.5 + 0.1 * i, 1) for i in range(26)]  # 0.5 ~ 3.0σ (prd_v4 M2)
+BASES = {"sigma": "σ 기준", "spec": "스펙 불량"}  # 공정분석 불량 코일 기준 (prd_v6: 고를 수 있게, 기본 σ)
 DEFECT_SCOPES = {"grade": "선택 강종", "all": "전체 강종"}
 CODE_FILTERS = {"specs": "규격약호", "aims": "출강목표", "uses": "용도코드", "plants": "공장"}  # 상태 키 → 화면 이름
 THK_BANDS = {"전체": (None, None), "~0.75": (None, 0.75), "0.75~1.0": (0.75, 1.0), "1.0~1.4": (1.0, 1.4),
@@ -109,8 +111,8 @@ def defaults() -> dict:
     return {"grade": PREFERRED_GRADE if PREFERRED_GRADE in gs else gs[0], "line": "전체", "start": start, "end": end,
             "prop": DEFAULT_PROP if DEFAULT_PROP in props() else props()[0],
             "props": [p for p in DEFAULT_PROPS if p in props()],
-            "factor": "자동", "defect": "파우더링", "side": "auto", "sigma": 1.0,
-            "view": "재질개요", "coil_ids": "", "id_type": "coil_no", "model": DEFAULT_MODEL,
+            "factor": "자동", "defect": "파우더링", "side": "auto", "sigma": 1.0, "basis": "sigma",
+            "view": "강종개요", "coil_ids": "", "id_type": "coil_no", "model": DEFAULT_MODEL,
             "spec_cols": ["spec_roll"], "specs": [], "aims": [], "uses": [], "plants": [],
             "thk_min": lo, "thk_max": hi, "coil_pos": "전체", "defect_scope": "grade"}
 
@@ -178,6 +180,9 @@ def apply_update(state: dict, changes: dict) -> tuple[dict, dict, list[str]]:
                     new["prop"] = applied["prop"] = DEFAULT_PROP if DEFAULT_PROP in ps else ps[0]
             elif key == "sigma":
                 value = round(min(max(float(value), 0.5), 3.0), 1)
+            elif key == "basis":
+                if value not in BASES:
+                    raise ValueError(f"불량 코일 기준은 {list(BASES)} 중 하나")
             elif key == "defect_scope":
                 if value not in DEFECT_SCOPES:
                     raise ValueError(f"결함 범위는 {list(DEFECT_SCOPES)} 중 하나")
@@ -235,7 +240,7 @@ def describe(state: dict) -> dict:
            "end_date": str(state["end"]), "prop": state["prop"], "factor": state["factor"],
            "defect": state["defect"], "side": state["side"], "view": state["view"],
            "model": state.get("model", DEFAULT_MODEL), "coil_pos": state.get("coil_pos", "전체"),
-           "props": shown_props(state), "sigma": state.get("sigma", 1.0), "defect_scope": state.get("defect_scope", "grade"),
+           "props": shown_props(state), "sigma": state.get("sigma", 1.0), "basis": state.get("basis", "sigma"), "defect_scope": state.get("defect_scope", "grade"),
            "thk_min": state.get("thk_min"), "thk_max": state.get("thk_max")}
     for key in CODE_FILTERS:
         if state.get(key):
@@ -253,7 +258,7 @@ def is_full_period(state: dict) -> bool:
 
 
 def analysis_args(state: dict) -> dict:
-    """분석 함수 공통 인자. 전체 기간이면 기간 비교 대신 문제 코일 vs 정상 코일 비교를 쓴다."""
+    """분석 함수 공통 인자. 전체 기간이면 기간 비교 대신 불량 코일 vs 정상 코일 비교를 쓴다."""
     full = is_full_period(state)
     return {"grade": state["grade"], "line": None if state["line"] == "전체" else state["line"],
             "start": None if full else str(state["start"]), "end": None if full else str(state["end"])}

@@ -16,9 +16,9 @@ import config
 from tools import db, pds
 
 REQUIRED = ["coil_no", "prod_date", "grade", "line"]
-SPEC_COLUMNS = {  # 재질 → (하한 컬럼, 상한 컬럼)
-    "YS": ("ys_min", "ys_max"), "TS": ("ts_min", "ts_max"), "EL": ("el_min", None), "BH": ("bh_min", None),
-    "rbar": ("rbar_min", None), "n_value": ("n_min", None),
+SPEC_COLUMNS = {  # 재질 → (하한 컬럼, 상한 컬럼). 순서 = 화면 재질 고정 순서 (prd_v6 K1), r0·r45·r90은 SPEC 없음
+    "YS": ("ys_min", "ys_max"), "TS": ("ts_min", "ts_max"), "EL": ("el_min", None), "n_value": ("n_min", None),
+    "r0": (None, None), "r45": (None, None), "r90": (None, None), "rbar": ("rbar_min", None), "BH": ("bh_min", None),
 }
 
 

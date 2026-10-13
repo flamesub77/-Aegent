@@ -14,13 +14,13 @@ from urllib.parse import urlencode
 import streamlit as st
 
 TTL = 8 * 3600
-KEPT = ["chat", "upload_source", "source_key", "upload_msg", "api_keys", "api_status", "ai_provider", "ai_models", "edit_draft",
+KEPT = ["chat", "upload_source", "source_key", "upload_msg", "api_keys", "api_status", "env_bad", "ai_provider", "ai_models",
         "run_mode", "fab_seen", "datasets", "dataset", "bubble_off", "spc_params"]  # 서버 메모리에 둘 것
 # URL 이름 ↔ 상태 키 (짧게)
 QP = {"g": "grade", "l": "line", "from": "start", "to": "end", "p": "prop", "v": "view", "m": "model", "f": "factor",
       "d": "defect", "sd": "side", "sc": "spec_col", "scs": "spec_cols", "sp": "specs", "am": "aims", "us": "uses",
       "pl": "plants", "tmin": "thk_min", "tmax": "thk_max", "pos": "coil_pos", "ids": "coil_ids", "idt": "id_type",
-      "ps": "props", "sg": "sigma", "dsc": "defect_scope"}  # sc(spec_col)는 v3 링크 호환용 (읽기만)
+      "ps": "props", "sg": "sigma", "dsc": "defect_scope", "bs": "basis"}  # sc(spec_col)는 v3 링크 호환용 (읽기만)
 LISTS = {"specs", "aims", "uses", "plants", "props", "spec_cols"}
 DATES = {"start", "end"}
 FLOATS = {"thk_min", "thk_max", "sigma"}

@@ -283,7 +283,7 @@ def test_easy_style_only_has_numbers_and_no_jargon():
 def test_full_period_group_names():
     c = A.compare("HSLA590C", "YS")
     grp, ref = T.group_names(c["mode"], c["side"])
-    assert grp.startswith("문제 코일") and ref == "정상 코일"
+    assert grp.startswith("불량 코일") and ref == "정상 코일"
 
 
 def test_coil_story_styles():

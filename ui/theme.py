@@ -86,7 +86,7 @@ h1 {font-size: 1.8rem !important; margin-bottom: 0 !important;}
 /* 해석 한 줄 (prd_v5 C1): 높이 고정, 넘치면 말줄임 (전체 문장은 마우스를 올리면) */
 .card-note {font-size: 0.86rem; line-height: 1.5; height: 1.5em; opacity: 0.85; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis;}
-/* 재질개요 구역 제목 (prd_v5 T2) */
+/* 강종개요 구역 제목 (prd_v5 T2) */
 .sec-title {font-size: 1.45rem; font-weight: 700; margin: 1.1rem 0 0.1rem 0; padding-bottom: 4px;
   border-bottom: 2px solid rgba(29,78,216,.35);}
 .sec-desc {font-size: 0.8rem; font-weight: 400; opacity: 0.65; margin-left: 0.7rem;}
@@ -110,17 +110,147 @@ h1 {font-size: 1.8rem !important; margin-bottom: 0 !important;}
 [class*="st-key-card_bad_"] {border: 2px solid #DC2626 !important; border-radius: 0.6rem;}
 /* 큰 탭 + 상단 고정바 (prd_v4 M8) */
 /* 키를 단 컨테이너는 같은 높이의 감싸개(stLayoutWrapper) 안에 있어, 감싸개를 고정해야 스크롤 동안 붙어 있다 */
+/* Streamlit 기본 머리글(» 사이드바 열기 · ⋮ 메뉴)이 상단바를 흰 바탕으로 가리지 않게: 바탕 투명, 높이 0,
+   » 버튼만 남겨 상단바 왼쪽 빈자리에 둔다. ⋮ 메뉴(테마·설정)는 앱 상단바 버튼이 대신한다 (prd_v8 U2) */
+header[data-testid="stHeader"] {background: transparent !important; height: 0 !important; min-height: 0 !important;
+  pointer-events: none;}
+header[data-testid="stHeader"] [data-testid="stExpandSidebarButton"],
+header[data-testid="stHeader"] [data-testid="stSidebarCollapsedControl"] {pointer-events: auto; position: fixed; top: 14px;
+  left: 10px; z-index: 999995;}
+header[data-testid="stHeader"] [data-testid="stMainMenu"], header[data-testid="stHeader"] [data-testid="stAppDeployButton"],
+header[data-testid="stHeader"] [data-testid="stDecoration"] {display: none !important;}
+header[data-testid="stHeader"] [data-testid="stExpandSidebarButton"] button {background: var(--background-color, #fff); border-radius: 8px;}
 [data-testid="stLayoutWrapper"]:has(> .st-key-tabbar) {position: sticky; top: 0; z-index: 990;}
 .st-key-tabbar {padding: 6px 0 4px 0; background: #fff; box-shadow: 0 6px 10px -8px rgba(15,23,42,.35);}
-.stApp .st-key-tabbar [data-testid="stButtonGroup"] button {min-height: 48px; padding: 0 22px; font-size: 1.05rem;
+.stApp .st-key-tabbar .st-key-d_view [data-testid="stButtonGroup"] button {min-height: 48px; padding: 0 22px; font-size: 1.05rem;
   font-weight: 500;}
-.stApp .st-key-tabbar [data-testid="stButtonGroup"] button[aria-checked="true"] {font-weight: 700;
+.stApp .st-key-tabbar .st-key-d_view [data-testid="stButtonGroup"] button[aria-checked="true"] {font-weight: 700;
   box-shadow: inset 0 -3px 0 #1D4ED8;}
-.tab-summary {text-align: right; font-size: 0.82rem; opacity: 0.75;}
-.stApp .st-key-tabbar .st-key-d_props button {min-height: 30px !important; padding: 0 8px !important;}
-.stApp .st-key-tabbar .st-key-d_props button p {font-size: 0.82rem;}
-.stApp .st-key-tabbar .st-key-d_props [data-testid="stButtonGroup"] > div {flex-wrap: nowrap; gap: 4px;}
-@media (max-width: 1500px) {.stApp .st-key-tabbar .st-key-d_props button {padding: 0 5px !important;}}
+.tab-summary {text-align: right; font-size: 0.82rem; opacity: 0.75; white-space: nowrap;}
+/* 상단바 (prd_v8 U1·U2): 탭은 밑줄형, 오른쪽 버튼은 같은 높이 36px */
+.stApp .st-key-tabbar .st-key-d_view [data-testid="stButtonGroup"] button {border: none !important; background: transparent !important;
+  border-radius: 0 !important;}
+.stApp .st-key-tabbar .st-key-d_view [data-testid="stButtonGroup"] button[aria-checked="true"] {color: #1D4ED8 !important;}
+/* 상단바 오른쪽 도구 (prd_v8 U1): 모두 높이 36px, 아이콘 버튼은 36×36, 간격 8px, 세로 가운데 */
+.st-key-tabrow {flex-wrap: nowrap !important; gap: 12px !important;}
+.st-key-tabrow > div {min-width: 0;}
+.st-key-tools {gap: 8px !important; align-items: center !important; flex-wrap: nowrap !important;}
+.st-key-tools > div {margin: 0 !important;}
+.st-key-tools button {height: 36px !important; min-height: 36px !important; border-radius: 8px !important;}
+.st-key-tools [data-testid="stPopover"] button {width: 36px; padding: 0 !important; justify-content: center;}
+.st-key-tools [data-testid="stPopover"] button > div {justify-content: center; gap: 0; margin: 0 !important; width: 100%;}
+/* 팝오버 화살표 자리(숨긴 아이콘의 감싸개)가 16px를 차지해 아이콘이 왼쪽으로 밀리던 문제: 감싸개째 숨김 */
+.st-key-tools [data-testid="stPopover"] button > div > div:last-child:has([data-testid="stIconMaterial"]) {display: none;}
+.st-key-tools .tab-summary {margin: 0 4px; line-height: 36px;}
+/* 코일분석 조건 카드: 단계 번호 · 요약 줄 · 실행 버튼 */
+.coil-step {display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.95rem; margin: 2px 0 6px;}
+.coil-step b {display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border-radius: 50%; background: #1D4ED8; color: #fff; font-size: 0.8rem;}
+.st-key-coil_run_row {border-top: 1px solid rgba(100,116,139,.25); padding-top: 12px; margin-top: 2px;}
+.st-key-coil_run_row > div:first-child {flex: 1 1 auto; min-width: 0;}
+.coil-sum {font-size: 0.92rem; color: inherit; opacity: .85;}
+.coil-sum.stale {color: #C2410C; opacity: 1;}
+.st-key-coil_run_btn button {min-width: 150px; height: 42px;}
+.st-key-coil_form [data-testid="stPills"] [data-testid="stButtonGroup"] {flex-wrap: nowrap;}
+/* 감시 조건 추천 프리셋: 버튼 글자가 줄바꿈되지 않게 글자 길이만큼 */
+.st-key-spc_presets [data-testid="stElementContainer"] {flex: 1 1 auto !important; width: auto !important; min-width: max-content;}
+.st-key-spc_presets button {white-space: nowrap; min-width: max-content;}
+.st-key-spc_presets button p {white-space: nowrap;}
+/* AI on/off 스위치: 다른 버튼과 같은 높이 36px 상자 */
+.st-key-ai_switch {height: 36px !important; min-height: 36px; box-sizing: border-box; padding: 0 10px; border: 1px solid rgba(100,116,139,.45); border-radius: 8px;
+  display: flex !important; align-items: center; justify-content: center; width: auto !important;}
+.st-key-ai_switch label {margin: 0 !important; white-space: nowrap; align-items: center !important; height: 34px;}
+.st-key-ai_switch label > div:not([data-testid]) {margin-top: 0 !important;}  /* 스위치 막대를 글자와 같은 높이 가운데로 */
+.st-key-ai_switch label {flex-direction: row-reverse; gap: 8px;}  /* 스위치를 글자 오른쪽으로 */
+.st-key-ai_switch label > div:not([data-testid]) {margin-right: 0 !important; margin-left: 0 !important;}
+.st-key-ai_switch [data-testid="stElementContainer"], .st-key-ai_switch [data-testid="stCheckbox"] {height: 34px;}
+.st-key-ai_switch label p {font-size: 0.9rem;}
+.st-key-ai_switch:has(input:checked) {border-color: #1D4ED8; background: rgba(59,130,246,.10);}
+.st-key-tools [data-testid="stMarkdownContainer"] p {margin: 0;}
+.st-key-tabbar .stButton button, .st-key-tabbar [data-testid="stPopover"] button {height: 36px; min-height: 36px;
+  border-radius: 8px; padding: 0 8px;}
+.st-key-tabbar [data-testid="stPopover"] button [data-testid="stIconMaterial"]:last-child {display: none;}
+.st-key-tabbar .st-key-run_mode button {min-height: 36px !important; padding: 0 10px !important; white-space: nowrap;}
+.st-key-run_mode [data-testid="stButtonGroup"], .st-key-run_mode [data-testid="stButtonGroup"] > div,
+.st-key-gk_view [data-testid="stButtonGroup"], .st-key-gk_view [data-testid="stButtonGroup"] > div {flex-wrap: nowrap !important;}
+.st-key-gk_view button {flex: 0 0 auto; min-width: max-content; padding: 0 10px !important; white-space: nowrap;}
+@media (max-width: 1500px) {.st-key-gk_view button {padding: 0 3px !important;} .st-key-gk_view button p {font-size: 0.74rem !important;}}
+.st-key-run_mode button {flex: 0 0 auto; min-width: max-content;}
+/* 조건 칩 (prd_v8 U3) */
+.st-key-chips {gap: 6px !important; flex-wrap: wrap;}
+.st-key-chips button {min-height: 26px !important; padding: 0 10px !important; border-radius: 999px !important;
+  border: 1px solid rgba(100,116,139,.35) !important; font-size: 0.8rem;}
+.chip {display: inline-block; padding: 2px 10px; border-radius: 999px; border: 1px solid rgba(100,116,139,.35);
+  font-size: 0.8rem; opacity: .9;}
+/* 강종개요 카드 (prd_v8 G1): 카드 전체가 버튼 (투명 버튼을 위에 겹침) */
+[class*="st-key-gk_"], [class*="st-key-pc_"] {position: relative;}
+[class*="st-key-pc_"] [class*="st-key-pcbtn_"] {position: absolute !important; inset: 0; z-index: 5; margin: 0 !important;
+  width: 100% !important; height: 100% !important;}
+[class*="st-key-pc_"] [class*="st-key-pcbtn_"] .stButton, [class*="st-key-pc_"] [class*="st-key-pcbtn_"] .stButton > div,
+[class*="st-key-pc_"] [class*="st-key-pcbtn_"] [data-testid="stTooltipIcon"],
+[class*="st-key-pc_"] [class*="st-key-pcbtn_"] [data-testid="stTooltipHoverTarget"] {position: static !important;
+  display: block !important; width: 100% !important; height: 100% !important;}
+[class*="st-key-pc_"] [class*="st-key-pcbtn_"] button {position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0;
+  cursor: pointer;}
+[class*="st-key-pc_"]:hover .ov-tile {border-color: #1D4ED8;}
+.ov-tile.pc.on {border: 2px solid #1D4ED8;}
+/* 버튼을 감싼 Streamlit 요소 상자(position: relative)째 카드 전체로 펼쳐 맨 위에 둔다 — 그림 어디를 눌러도 선택 */
+[class*="st-key-gk_"] [class*="st-key-gkbtn_"] {position: absolute !important; inset: 0; z-index: 5; margin: 0 !important;
+  width: 100% !important; height: 100% !important;}
+[class*="st-key-gk_"] [class*="st-key-gkbtn_"] .stButton, [class*="st-key-gk_"] [class*="st-key-gkbtn_"] .stButton > div,
+[class*="st-key-gk_"] [class*="st-key-gkbtn_"] [data-testid="stTooltipIcon"],
+[class*="st-key-gk_"] [class*="st-key-gkbtn_"] [data-testid="stTooltipHoverTarget"] {position: static !important;
+  display: block !important; width: 100% !important; height: 100% !important;}
+[class*="st-key-gk_"] [class*="st-key-gkbtn_"] button {position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0;
+  cursor: pointer;}
+[class*="st-key-gk_"]:hover .gk {border-color: #1D4ED8;}
+.gk {border: 1px solid rgba(100,116,139,.35); border-radius: 12px; padding: 8px 10px 6px 10px; height: 138px;
+  overflow: hidden; display: flex; flex-direction: column;}
+.gk.on {border: 2px solid #1D4ED8;} .gk.bad .gk-fail {color: #DC2626;}
+.gk-head {font-size: 0.86rem; white-space: nowrap; overflow: hidden;} .gk-head span {font-size: 0.72rem; opacity: .7; margin-left: 4px;}
+.gk-num {font-size: 1.5rem; font-weight: 700; line-height: 1.2;}
+.gk-fail {font-size: 0.78rem; color: #EA7A2C; font-weight: 500;} .gk-fail.none {color: inherit; opacity: .55;}
+.gk-help {display: inline-block; width: 15px; height: 15px; line-height: 13px; text-align: center; border-radius: 50%;
+  border: 1px solid currentColor; font-size: 10px; opacity: .6; cursor: help;}
+.gk-svg {margin-top: auto;}
+/* 기본 정보 가로 표 + 공정 카드 (prd_v8 B1·B2) */
+.ov-wrap {overflow-x: auto; border: 1px solid rgba(100,116,139,.3); border-radius: 12px;}
+table.ov {border-collapse: collapse; width: 100%; font-size: 0.8rem;}
+table.ov th {background: rgba(59,130,246,.08); font-weight: 500; padding: 6px 8px; text-align: left; white-space: nowrap;}
+table.ov td {padding: 6px 8px; vertical-align: top; border-top: 1px solid rgba(100,116,139,.2); word-break: keep-all;}
+/* 재질 카드와 같은 크기: 재질 격자 = 화면 60%(- 16px)를 4칸, 간격 16px → 카드 폭 15% - 16px, 높이 138px */
+.ov-grid {display: grid; grid-template-columns: repeat(auto-fill, calc(15% - 16px)); gap: 16px; margin-bottom: 14px;}
+.ov-group {font-size: 1.02rem; font-weight: 700; margin: 6px 0 6px 2px;}
+.ov-group span {font-size: 0.76rem; font-weight: 400; opacity: .65; margin-left: 8px;}
+.ov-stage {font-size: 0.68rem !important; font-weight: 500; padding: 1px 6px; border-radius: 999px; margin: 0 6px 0 0 !important;
+  background: rgba(59,130,246,.12); color: #1D4ED8; opacity: 1 !important;}
+.ov-tile.pc .gk-head {white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+.ov-tile.empty {opacity: .65;}
+.ov-tile {border: 1px solid rgba(100,116,139,.35); border-radius: 12px; padding: 8px 10px 6px 10px; height: 138px;
+  display: flex; flex-direction: column; gap: 4px; overflow: hidden;}
+.ov-t {font-size: 0.86rem; font-weight: 700;}
+.ov-num {font-size: 1.5rem; font-weight: 700; line-height: 1.15;} .ov-num.sm {font-size: 1.15rem;}
+.ov-num small {font-size: 0.75rem; font-weight: 400; opacity: .7; margin-left: 3px;}
+.ov-sub {font-size: 0.72rem; opacity: .7; margin-top: auto;}
+.ov-bar {display: flex; height: 12px; border-radius: 6px; overflow: hidden; margin-top: 4px;}
+.ov-bar span {display: block; height: 100%;}
+.ov-legend {display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 0.74rem;}
+.ov-legend i {display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px;}
+.ov-chips {display: flex; flex-wrap: wrap; gap: 4px;}
+.ov-chip {font-size: 0.78rem; padding: 2px 8px; border-radius: 999px; background: rgba(59,130,246,.12); color: #1D4ED8;}
+.ov-none {font-size: 0.78rem; opacity: .6;}
+.pc-grid {display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;}
+.gk.pc {height: 118px;} .pc-sigma {font-size: 0.8rem; opacity: .85;} .pc-foot {font-size: 0.72rem; opacity: .75;}
+.st-key-tabbar .stButton button p, .st-key-run_mode button p {white-space: nowrap;}
+@media (max-width: 1700px) {.st-key-tools .tab-summary {display: none;}}
+@media (max-width: 1500px) {.tab-summary {display: none;}
+  .stApp .st-key-tabbar .st-key-d_view [data-testid="stButtonGroup"] button {padding: 0 6px !important; min-height: 36px;}
+  .stApp .st-key-tabbar .st-key-d_view [data-testid="stButtonGroup"] button p {font-size: 0.84rem !important;}
+  .st-key-tabbar .stButton button {padding: 0 4px;} .st-key-tabbar .stButton button p {font-size: 0.8rem;}
+  .gk-num {font-size: 1.2rem;} .gk .kpi-delta {display: none;} .gk-head span {display: none;}
+  .st-key-run_mode button {padding: 0 6px !important;}}
+@media (max-width: 1500px) {.stApp .st-key-tabbar .st-key-d_view [data-testid="stButtonGroup"] button {min-height: 42px; padding: 0 11px;}
+  .stApp .st-key-tabbar .st-key-d_view [data-testid="stButtonGroup"] button p {font-size: 0.9rem;} .tab-summary {font-size: 0.72rem;}}
 /* 머리글 오른쪽 위 버튼 4개 (prd_v5 H1): 같은 높이 40px, 같은 모서리, 아이콘 18px */
 .st-key-hdr [data-testid="stColumn"] button {height: 40px; min-height: 40px; border-radius: 10px; padding: 0 10px;}
 .st-key-hdr [data-testid="stColumn"] button p {font-size: 18px; line-height: 1;}
@@ -181,4 +311,17 @@ body:has(.st-key-agent_fab:hover) .fab-tip {opacity: .92;}
     max-width: 100vw !important; margin: 0 !important;}
   [role="dialog"]:has(.st-key-agent_panel) {height: 100vh !important; border-radius: 0;}
 }
+/* 강종개요 통일 (글꼴 4단계 · 간격 16px): 카드 제목 0.86rem 굵게 / 큰 숫자 1.5rem / 상태 줄 0.8rem / 보조 0.75rem.
+   카드 사이 가로·세로 16px, 묶음 제목 위 24px·아래 8px. */
+.ov-t, .gk-head, .gk-head b {font-size: 0.86rem !important; font-weight: 700 !important;}
+.ov-num, .ov-num.sm, .gk-num {font-size: 1.5rem !important; font-weight: 700; line-height: 1.2;}
+.gk-fail, .pc-sigma {font-size: 0.8rem !important; font-weight: 500;}
+.ov-sub, .ov-legend, .ov-chip, .ov-none, .pc-foot, .ov-num small, .gk-head span:not(.ov-stage) {font-size: 0.75rem !important; font-weight: 400 !important;}
+.ov-stage {font-size: 0.7rem !important;}
+.gk, .ov-tile {margin: 0 !important;}
+[class*="st-key-gk_"]:not(.st-key-gk_big):not(.st-key-gk_view), [class*="st-key-pc_"]:not(.st-key-pc_big) {margin-bottom: 0 !important;}
+.st-key-gkgrid, .st-key-pcgrid {gap: 16px !important;}
+.st-key-gkgrid [data-testid="stMarkdownContainer"], .st-key-pcgrid [data-testid="stMarkdownContainer"] {margin-bottom: 0 !important;}
+.ov-group {margin: 24px 0 8px 2px !important; line-height: 1.6;}
+.ov-grid {margin-bottom: 0 !important;}
 """

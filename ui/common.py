@@ -26,7 +26,8 @@ def badge(label: str, style: str | None = None) -> str:
 def mode_badge(mode: str | None = None, api_key: str | None = None) -> str:
     from ui import ai
     if ai.effective() == "offline":
-        why = "" if ai.mode() == "offline" else " (AI 키 없음)"
+        rejected = ai.env_rejected() or ai.st.session_state.get("api_status", {}).get(ai.provider()) == "bad"
+        why = "" if ai.mode() == "offline" else " (키 오류 · 🔑에서 새 키)" if rejected else " (AI 키 없음)"
         return f":green-badge[:material/lock: 오프라인 · 외부 전송 없음{why}]"
     return f":blue-badge[:material/smart_toy: AI 모드 · {ai.label()}]"
 

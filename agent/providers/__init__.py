@@ -20,6 +20,11 @@ class ProviderError(Exception):
     """제공자 호출 실패. str(e)는 "OpenAI에 연결할 수 없어"처럼 문장 앞부분 (뒤에 "오프라인 해석기로 …"를 붙인다)."""
 
 
+def is_auth_error(message: str | None) -> bool:
+    """키가 거부된 실패인지 (어댑터들의 _why 문장 기준)."""
+    return bool(message) and "키가 올바르지 않아" in message
+
+
 def label(provider: str) -> str:
     return config.PROVIDERS.get(provider, (provider,))[0]
 

@@ -7,7 +7,7 @@ import config
 PATH = config.USER_DIR / "favorites.json"
 MAX = 10
 KEYS = ["grade", "line", "start", "end", "props", "prop", "spec_cols", "specs", "aims", "uses", "plants",
-        "thk_min", "thk_max", "coil_pos", "view", "model", "sigma", "side", "defect", "defect_scope"]
+        "thk_min", "thk_max", "coil_pos", "view", "model", "sigma", "basis", "side", "defect", "defect_scope"]
 
 
 def load() -> list[dict]:

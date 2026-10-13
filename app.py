@@ -9,18 +9,17 @@ from html import escape
 
 import pandas as pd
 import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder
 
 import config
-from agent import router
 from tools import analysis as A
 from tools import charts as C
 from tools import dashboard_state as ds
-from tools import edits as E
 from tools import narrative as N
 from tools import pds, spc
 from tools import terms as T
 from tools.datasource import get_source, use_source
-from tools.domain import DEFECTS, FACTORS, PROP_DECIMALS, PROP_LABEL, PROP_SHORT, factor_label
+from tools.domain import DEFECTS, FACTORS, PROP_DECIMALS, PROP_LABEL, PROP_SHORT, factor_label, factor_unit
 from tools.ranking import HELP as MODEL_HELP
 from tools.ranking import MODELS, SCORE_LABEL
 from ui import ai as AI
@@ -30,7 +29,6 @@ from ui.common import badge, mode_badge, source_badge
 
 CONF_BAND = {"~0.75": (None, 0.75), "0.75~1.0": (0.75, 1.0), "1.0~1.4": (1.0, 1.4), "1.4~": (1.4, None)}
 PROP_WORD = {"YS": "항복강도", "TS": "인장강도", "EL": "연신율", "BH": "소부경화", "rbar": "r값", "n_value": "n값"}  # 추천 질문용
-MODE_TEXT = {"offline": "🔒 오프라인", "ai": "🤖 AI 모드"}
 CHART_H, SPC_H = 360, 460  # 카드 그래프 높이 고정 (prd_v5 L1)
 
 # ---------------------------------------------------------------------------
@@ -49,9 +47,13 @@ AI.init()
 DEFAULTS = ds.defaults()
 
 if (qp := st.session_state.pop("_qp_state", None)) is not None:  # 새로 고침·링크: URL의 필터를 먼저 적용
+    if "defect" in qp:  # 링크에 결함이 있으면 자동 선택(발생률 1위)보다 우선
+        st.session_state["defect_pinned"] = True
     restored, _, _ = ds.apply_update(DEFAULTS, qp)
     for k, v in restored.items():
         st.session_state[f"d_{k}"] = v
+    if restored.get("coil_ids"):  # 링크·AI가 넣은 코일 번호는 실행 버튼 없이 바로 분석
+        st.session_state["coil_autorun"] = True
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(f"d_{k}", v)
 st.session_state["d_view"] = ds.VIEW_ALIASES.get(st.session_state["d_view"], st.session_state["d_view"])
@@ -60,8 +62,12 @@ st.session_state.setdefault("chat", [])
 st.session_state.setdefault("spc_params", dict(spc.DEFAULTS))
 
 if pending := st.session_state.pop("pending", None):  # 에이전트·버튼이 바꾼 상태는 다음 실행 첫머리에 반영
+    if "defect" in pending:  # AI가 고른 결함은 자동 선택보다 우선
+        st.session_state["defect_pinned"] = True
     for k, v in pending.items():
         st.session_state[f"d_{k}"] = v
+    if pending.get("coil_ids"):  # 링크·AI가 넣은 코일 번호는 실행 버튼 없이 바로 분석
+        st.session_state["coil_autorun"] = True
     if "start" in pending or "end" in pending:
         st.session_state["d_period"] = (st.session_state["d_start"], st.session_state["d_end"])
 
@@ -99,7 +105,7 @@ def set_period(months: int | None = None, this_year: bool = False):
 
 
 QUICK_PERIODS = {"최근 1개월": {"months": 1}, "3개월": {"months": 3}, "6개월": {"months": 6}, "올해": {"this_year": True},
-                 "전체": {}}
+                 "최근 3년": {"months": 36}, "최근 5년": {"months": 60}, "전체": {}}  # 3·5년 (prd_v6 F1)
 
 
 def on_quick_period():
@@ -127,18 +133,9 @@ def on_spec_cols():
     st.session_state["d_spec_cols"] = cols or ["spec_roll"]
 
 
-def on_material():
-    chosen = list(st.session_state.get("d_props") or [])
-    if chosen and st.session_state.get("d_prop") not in chosen:
-        st.session_state["d_prop"] = chosen[0] if ds.DEFAULT_PROP not in chosen else ds.DEFAULT_PROP
-    elif not chosen:
-        st.session_state["d_prop"] = ds.DEFAULT_PROP if ds.DEFAULT_PROP in ds.props() else ds.props()[0]
-
-
 def on_mode():
-    if st.session_state.get("run_mode") is None:  # 이미 고른 것을 다시 눌러도 꺼지지 않게
-        st.session_state["run_mode"] = st.session_state.get("_last_mode", "offline")
-    st.session_state["_last_mode"] = st.session_state["run_mode"]
+    """AI on/off 스위치 → run_mode ("ai" | "offline")."""
+    st.session_state["run_mode"] = "ai" if st.session_state.get("ai_toggle") else "offline"
     if st.session_state["run_mode"] == "ai" and not AI.has_key():
         st.session_state["toast"] = "오른쪽 위 🔑에 키를 넣으면 AI 모드로 바뀌어요. 그동안은 오프라인으로 답해요."
 
@@ -251,15 +248,14 @@ with st.sidebar:
     st.selectbox("시편 위치", list(ds.COIL_POS), key="d_coil_pos", format_func=ds.COIL_POS.get)
     st.button("필터 초기화", on_click=reset_filters, width="stretch", icon=":material/restart_alt:")
 
-# 재질 (prd_v5 T2): 기본 YP·TS·EL, 강종에 없는 재질은 뺀다
+# 재질 (prd_v6 K1·K3): 고르지 않는다. 데이터가 있는 재질을 고정 순서(YP·TS·EL·n·r0·r45·r90·r̄·BH)로 모두 보여준다.
+# 공정분석·조기 감시 기준 재질(prop)만 그 탭의 선택 상자로 고른다 (기본 TS)
 grade_props = list(A.spec(st.session_state["d_grade"]))
-st.session_state["d_props"] = [p for p in st.session_state["d_props"] if p in grade_props]
 if st.session_state["d_prop"] not in grade_props:
-    st.session_state["d_prop"] = ds.focus_prop({"props": st.session_state["d_props"], "prop": None}) \
-        if st.session_state["d_props"] else (ds.DEFAULT_PROP if ds.DEFAULT_PROP in grade_props else grade_props[0])
+    st.session_state["d_prop"] = ds.DEFAULT_PROP if ds.DEFAULT_PROP in grade_props else grade_props[0]
 state = state_now()
-shown = [p for p in ds.shown_props(state) if p in grade_props] or [grade_props[0]]
-prop = ds.focus_prop(state) if ds.focus_prop(state) in grade_props else shown[0]
+shown = grade_props
+prop = state["prop"]
 state["prop"] = prop
 args = ds.analysis_args(state)
 sub = ds.subset_args(state)
@@ -269,9 +265,9 @@ SPEC = A.spec(grade)
 
 
 @st.cache_data(show_spinner="분석하는 중…", max_entries=64)
-def run_analysis(source_key, grade, line, start, end, prop, side, sub, model, sigma):
+def run_analysis(source_key, grade, line, start, end, prop, side, sub, model, sigma, basis="sigma"):
     diag = A.diagnose(grade, line, start, end, props=list(A.spec(grade)), **sub)
-    comp = A.compare(grade, prop, line, start, end, side=side, top_n=10, model=model, sigma=sigma, **sub)
+    comp = A.compare(grade, prop, line, start, end, side=side, top_n=10, model=model, sigma=sigma, basis=basis, **sub)
     return diag, comp, N.insights(diag, comp)
 
 
@@ -283,25 +279,14 @@ def run_spc(source_key, grade, line, start, end, prop, sub, params: tuple):
 
 
 diag, comp, ins = run_analysis(SOURCE_KEY, args["grade"], args["line"], args["start"], args["end"], prop,
-                               state["side"], sub, state["model"], state["sigma"])
+                               state["side"], sub, state["model"], state["sigma"], state["basis"])
 coils = A.filter_coils(grade, args["line"], **sub)
 target, baseline = A.split_period(coils, args["start"], args["end"])
 full_period = ds.is_full_period(state)
 
 
-def groups_for(q):
-    """재질마다 비교 그룹 (재질현황 분포 카드용)."""
-    mode_q, side_q, g, r = A.comparison_groups(coils, grade, q, args["start"], args["end"], side=state["side"],
-                                               sigma=state["sigma"])
-    if not full_period:
-        g, r = target, baseline
-    name_g, name_r = T.group_names(mode_q, side_q)
-    judge_q = diag["properties"][q]["judgement"] if diag["n_baseline"] else "비교 불가"
-    return mode_q, side_q, g, r, name_g, name_r, C.direction_color(side_q or judge_q)
-
-
 mode, side, group, ref = A.comparison_groups(coils, grade, prop, args["start"], args["end"], side=state["side"],
-                                             sigma=state["sigma"])
+                                             sigma=state["sigma"], basis=state["basis"])
 p = diag["properties"][prop]
 judge = p["judgement"] if diag["n_baseline"] else "비교 불가"
 group_color = C.direction_color(side or judge)
@@ -326,12 +311,12 @@ bands = A.thickness_band(coils["thk"]) if "thk" in coils else pd.Series(dtype=ob
 # 그래프 카드 (prd_v5 C1·C3·L1): 이모지 + 결론 제목 + (?) → 고정 높이 그래프 → 해석 한 줄
 # ---------------------------------------------------------------------------
 def card(note: tuple[str, list[str]], fig, key: str, control=None, extra=None, emoji: str = "", help_key: str | None = None,
-         height: int = CHART_H):
+         height: int = CHART_H, ctrl_w: float = 1.15):
     title, lines = note
     text = f"{emoji} {title}".strip()
     with st.container(border=True, key=f"card_{key}"):
         if control:
-            c1, c2 = st.columns([3.4, 1.15], vertical_alignment="top")
+            c1, c2 = st.columns([3.4, ctrl_w], vertical_alignment="top")
             c1.markdown(TH.card_title(text), unsafe_allow_html=True, help=T.CARD_HELP.get(help_key or key))
             with c2:
                 control()
@@ -346,44 +331,85 @@ def card(note: tuple[str, list[str]], fig, key: str, control=None, extra=None, e
 
 
 def section(code: str):
-    """재질개요 구역 제목: 번호 + 이모지 + 이름 + 작은 설명 + (?) (prd_v5 T2·C3)."""
+    """강종개요 구역 제목: 번호 + 이모지 + 이름 + 작은 설명 + (?) (prd_v5 T2·C3)."""
     no, emo, name, desc, helptext = T.SECTIONS[code]
     st.markdown(f"<div class='sec-title'>{no} {emo} {name}<span class='sec-desc'>{desc}</span></div>",
                 unsafe_allow_html=True, help=helptext)
 
 
-def kpi_strip():
-    """재질 고정카드 (prd_v5 T3, 압축형): 같은 폭·높이, 최대 6장. SPEC·평균·증감·작은 히스토그램·만족률."""
-    cells = []
-    narrow = len(shown) >= 5
-    for q in shown[:6]:
-        v = diag["properties"][q]
-        t, nd = v["target"], PROP_DECIMALS.get(q, 1)
-        u = "" if v["unit"] == "-" else f" {v['unit']}"
-        lo_, hi_ = v["spec"]["min"], v["spec"]["max"]
-        spec_txt = "SPEC 없음" if lo_ is None and hi_ is None else \
-            f"{'' if lo_ is None else f'{lo_:g}'}~{'' if hi_ is None else f'{hi_:g}'}"
-        if not t.get("n"):
-            cells.append(f"<div class='kpi'><div class='kpi-head'>{PROP_SHORT.get(q, q)}</div><div class='kpi-foot'>값 없음</div></div>")
-            continue
-        rate = t.get("spec_rate")
-        bad = rate is not None and rate < 95
-        vals = (target if not full_period else coils)[q]
-        ref_vals = baseline[q] if (not full_period and diag["n_baseline"]) else None
-        svg = C.mini_hist_svg(vals, (lo_, hi_), ref_vals, w=92 if narrow else 110, h=34)
-        delta = ""
-        if diag["n_baseline"] and v["shift"] is not None:
-            cls = "up" if v["shift"] > 0 else "down"
-            delta = f"<span class='kpi-delta {cls}'>{'▲' if v['shift'] > 0 else '▼'}{abs(v['shift']):.{nd}f}</span>"
-        tip = f"표준편차 {t['std']} · 범위 {t['min']}~{t['max']}" + (f" · 결측 {t['missing']:,}" if t.get("missing") else "")
-        rate_txt = f"{'⚠️ ' if bad else ''}만족률 <b>{rate}%</b>" if rate is not None else "SPEC 없음"
-        cells.append(
-            f"<div class='kpi{' bad' if bad else ''}{' focus' if q == prop else ''}' title='{escape(tip)}'>"
-            f"<div class='kpi-head'>{PROP_SHORT.get(q, q)}{u}<span class='kpi-spec'>{spec_txt}</span></div>"
-            f"<div class='kpi-row'><div><span class='kpi-num'>{t['mean']:.{nd}f}</span>{delta}"
-            f"<div class='kpi-foot'>{rate_txt}</div></div><div class='kpi-svg'>{svg}</div></div></div>")
-    st.markdown(f"<div class='kpi-strip' style='grid-template-columns: repeat({max(len(cells), 3)}, minmax(0, 1fr))'>"
-                f"{''.join(cells)}</div>", unsafe_allow_html=True, help=T.CARD_HELP["kpi"])
+DEFECT_WARN = 5.0  # 불량률 강조 기준 % (prd_v6 K1)
+
+
+def pick_gk(q: str):
+    st.session_state["gk_prop"] = q
+
+
+def gk_card(q: str) -> bool:
+    """강종개요 재질 카드 하나 (prd_v8 G1). 값이 없으면 그리지 않고 False."""
+    v = diag["properties"].get(q)
+    if not v or not v["target"].get("n"):
+        return False
+    t, nd = v["target"], PROP_DECIMALS.get(q, 1)
+    u = "" if v["unit"] == "-" else f" {v['unit']}"
+    lo_, hi_ = v["spec"]["min"], v["spec"]["max"]
+    spec_txt = "" if lo_ is None and hi_ is None else f"{'' if lo_ is None else f'{lo_:g}'}~{'' if hi_ is None else f'{hi_:g}'}"
+    rate = t.get("spec_rate")
+    fail = None if rate is None else round(100 - rate, 1)
+    bad = fail is not None and fail >= DEFECT_WARN
+    vals = (target if not full_period else coils)[q]
+    svg = C.mini_hist_svg(vals, (lo_, hi_), None, w=200, h=34).replace("<svg width='200' height='34'",
+                                                                         "<svg width='100%' height='34' preserveAspectRatio='none'")
+    delta = ""
+    if diag["n_baseline"] and v["shift"] is not None:
+        cls = "up" if v["shift"] > 0 else "down"
+        delta = f"<span class='kpi-delta {cls}'>{'▲' if v['shift'] > 0 else '▼'}{abs(v['shift']):.{nd}f}</span>"
+    fail_txt = f"불량 {fail:g}%" if fail is not None else "불량 -"
+    tip = (f"불량률 = SPEC 밖 코일 비율 ({t['n']:,}코일 중)" if fail is not None else "SPEC 없음") + \
+        f" · 표준편차 {t['std']} · 범위 {t['min']}~{t['max']}"
+    chosen = st.session_state.get("gk_prop", prop) == q
+    with st.container(key=f"gk_{q}"):
+        st.markdown(
+            f"<div class='gk{' on' if chosen else ''}{' bad' if bad else ''}'>"
+            f"<div class='gk-head'><b>{PROP_SHORT.get(q, q)}</b><span>{u} {spec_txt}</span></div>"
+            f"<div class='gk-num'>{t['mean']:.{nd}f}{delta}</div>"
+            f"<div class='gk-fail{' none' if fail is None else ''}'>{fail_txt} <span class='gk-help' title='{escape(tip)}'>?</span></div>"
+            f"<div class='gk-svg'>{svg}</div></div>", unsafe_allow_html=True)
+        st.button(" ", key=f"gkbtn_{q}", on_click=pick_gk, args=(q,),
+                  help=f"누르면 {PROP_LABEL.get(q, q)} 분포를 오른쪽에 크게 보여줘요. {tip}")  # 카드 전체가 이 버튼
+    return True
+
+
+def gk_section():
+    """재질 카드 4열 격자 + 오른쪽 큰 분포(합격/불량) (prd_v8 G1·G2). v8 후속: 별도 구역 제목 없이 기본 정보 안
+    🧪 재질 묶음으로 (공정 조건 위)."""
+    st.markdown("<div class='ov-group'>🧪 재질<span>평균 · 스펙 불량률 · 분포 — 카드를 누르면 오른쪽에 크게</span></div>",
+                unsafe_allow_html=True)
+    have = [q for q in shown if diag["properties"].get(q, {}).get("target", {}).get("n")]
+    if st.session_state.get("gk_prop") not in have:
+        st.session_state["gk_prop"] = prop if prop in have else (have[0] if have else prop)
+    left, right = st.columns([1.5, 1], gap="medium")
+    with left.container(key="gkgrid"):  # 카드 줄 사이 간격 16px (theme)
+        for i in range(0, len(have), 4):
+            cols = st.columns(4, gap="small")
+            for col, q in zip(cols, have[i:i + 4]):
+                with col:
+                    gk_card(q)
+    with right:
+        q = st.session_state["gk_prop"]
+        g = target if not full_period else coils
+        rows = -(-len(have) // 4)
+
+        def view_switch():  # 분포(히스토그램, 기본) ↔ 두께 그룹별 막대
+            st.segmented_control("보기", ["분포", "두께별"], key="gk_view", default="분포", label_visibility="collapsed",
+                                 help="분포 = 합격/불량 히스토그램 · 두께별 = 두께 구간마다 평균(±σ)·코일 수·불량률 막대")
+
+        if (st.session_state.get("gk_view") or "분포") == "두께별":
+            tg = A.thickness_groups(g, q, SPEC[q])
+            card(N.note_thickness(tg, q), C.thickness_bars(tg, q, SPEC[q]), "gk_big", view_switch, emoji="📏",
+                 help_key="thickness", height=max(150 * rows - 40, 260), ctrl_w=1.9)
+        else:
+            card(N.note_defect_dist(g, None, q, SPEC[q]), C.density_overview(g, q, SPEC[q]), "gk_big", view_switch,
+                 emoji="📊", help_key="distribution", height=max(150 * rows - 40, 260), ctrl_w=1.9)
 
 
 def confounder_buttons():
@@ -391,7 +417,7 @@ def confounder_buttons():
     for w in [w for w in comp["warnings"] if w.get("code") == "confounder"]:
         colname = w["column"]
         share = comp["confounders"][colname]["share_pct"]
-        key = max(share, key=lambda k: share[k]["group"] - share[k]["reference"])  # 문제 코일 쪽에 몰린 조건
+        key = max(share, key=lambda k: share[k]["group"] - share[k]["reference"])  # 불량 코일 쪽에 몰린 조건
         label = ds.COIL_POS.get(key, key) if colname == "coil_pos" else key
         if colname == "thk_band":
             lo_b, hi_b = CONF_BAND.get(key, (None, None))
@@ -405,15 +431,15 @@ def confounder_buttons():
 
 
 # ---------------------------------------------------------------------------
-# 📊 재질개요 (prd_v5 T2): ① 생산량 · ② 재질현황(+🚨 조기 감시) · ③ 두께별 재질현황
+# 📊 강종개요 (prd_v5 T2): ① 생산량 · ② 재질현황(+🚨 조기 감시) · ③ 두께별 재질현황
 # ---------------------------------------------------------------------------
 def spc_settings():
     with st.popover("⚙ 감시 조건", width="stretch", help="조기 감시 고급 설정 (추천 조건 프리셋 · EWMA λ·L · CUSUM k·h · 기준 기간)"):
         prm = st.session_state["spc_params"]
         st.caption("추천 조건")
-        cols = st.columns(len(spc.PRESETS))
-        for c, (name, preset) in zip(cols, spc.PRESETS.items()):
-            if c.button(name, key=f"spc_pre_{name}", width="stretch",
+        row = st.container(horizontal=True, key="spc_presets")  # 글자 길이만큼 넓게 (줄바꿈 없음)
+        for name, preset in spc.PRESETS.items():
+            if row.button(name, key=f"spc_pre_{name}", width="stretch",
                         type="primary" if all(prm.get(k) == v for k, v in preset.items()) else "secondary"):
                 prm.update(preset)
                 for k in ("lam", "L", "k", "h", "base_months", "persist"):
@@ -429,139 +455,177 @@ def spc_settings():
         st.caption("기준 = 보는 기간 직전 N개월 (기간을 안 고르면 데이터 처음 N개월).")
 
 
-def prop_pick(key: str):
-    def _pick():
-        if len(shown) > 1:
-            st.selectbox("재질", shown, key=key, format_func=lambda q: PROP_SHORT.get(q, q), label_visibility="collapsed")
-    return _pick
+PROC_LABEL = {"OA": "과시효 온도 OAS", "RCS": "급냉대 온도 RCS"}  # 엑셀 열 이름(OAS) 그대로 보이게
 
 
-def material_pair(q: str):
-    """재질 하나: 분포 + 월별 추이."""
-    _, _, g, r, ng, nr, colr = groups_for(q)
-    judge_q = diag["properties"][q]["judgement"] if diag["n_baseline"] else "비교 불가"
-    c1, c2 = st.columns(2)
-    with c1:
-        card(N.note_distribution(diag, q, ng, nr), C.histogram(g, r, q, SPEC[q], ng, color=colr, ref_name=nr),
-             f"hist_{q}", emoji="🧪", help_key="distribution")
-    with c2:
-        card(N.note_monthly(coils, q), C.monthly_box(coils, q, SPEC[q], (args["start"], args["end"]),
-                                                     C.direction_color(judge_q)), f"box_{q}", emoji="📈",
-             help_key="monthly")
+def pick_pc(f: str):
+    st.session_state["pc_factor"] = f
 
 
-def thickness_pair(q: str):
-    tg = A.thickness_groups(coils, q, SPEC[q])
-    worst = tg.loc[tg["spec_rate"].idxmin(), "band"] if not tg.empty and tg["spec_rate"].notna().any() else None
-    c1, c2 = st.columns(2)
-    with c1:
-        card(N.note_thickness(tg, q), C.thickness_box(coils, q, SPEC[q], bands, [b for *_, b in A.THK_GROUPS], worst),
-             f"thk_{q}", emoji="📏", help_key="thickness")
-    with c2:
-        with st.container(border=True, key=f"card_thktbl_{q}"):
-            st.markdown(TH.card_title(f"📏 두께 구간별 {PROP_SHORT[q]} 표"), unsafe_allow_html=True,
-                        help="구간마다 코일 수·평균·표준편차·만족률·Cpk예요. Cpk 1.33 이상이면 공정 능력이 충분한 편, "
-                             "1.0 미만이면 SPEC을 벗어나기 쉬운 상태예요.")
-            if tg.empty:
-                st.caption("두께 값이 있는 코일이 없어요")
-            else:
-                nd = PROP_DECIMALS.get(q, 1)
-                st.dataframe(pd.DataFrame({
-                    "두께": [N.band_text(b) for b in tg["band"]], "코일 수": tg["n"].astype(int),
-                    "평균": tg["mean"].round(nd), "표준편차": tg["std"].round(nd + 1),
-                    "만족률(%)": tg["spec_rate"], "Cpk": tg["cpk"]}), hide_index=True, width="stretch",
-                    height=CHART_H - 20)
-            st.markdown("<div class='card-note'>&nbsp;</div>", unsafe_allow_html=True)
+def pc_card(r: dict, df: pd.DataFrame):
+    """공정 조건 카드 하나 (재질 카드처럼 카드 전체가 버튼): 공정 단계·이름·단위, σ, 작은 히스토그램, "강종 : 평균"."""
+    f, unit = r["factor"], factor_unit(r["factor"])
+    name = PROC_LABEL.get(f, factor_label(f))
+    chosen = st.session_state.get("pc_factor") == f
+    head = (f"<div class='gk-head'><span class='ov-stage'>{r['stage']}</span><b>{escape(name)}</b>"
+            f"<span>{unit}</span></div>")
+    with st.container(key=f"pc_{f}"):
+        if not r["n"]:
+            st.markdown(f"<div class='ov-tile pc empty{' on' if chosen else ''}'>{head}<div class='ov-none'>이 조건에는 값이 없어요</div>"
+                        f"<div class='pc-foot'>{grade} : -</div></div>", unsafe_allow_html=True)
+            tip = "값이 없어요"
+        else:
+            nd = 2 if unit in ("%",) and r["mean"] < 10 else 1 if abs(r["mean"]) < 1000 else 0
+            svg = C.mini_hist_svg(df[f], (None, None), None, w=200, h=34, mark=r["aim"]).replace(
+                "<svg width='200' height='34'", "<svg width='100%' height='34' preserveAspectRatio='none'")
+            aim = f" · 지시 {r['aim']:.{nd}f}" if r["aim"] is not None else ""
+            tip = f"{name} · 범위 {r['min']:.{nd}f}~{r['max']:.{nd}f}{unit} · 코일 {r['n']:,}{aim}"
+            st.markdown(f"<div class='ov-tile pc{' on' if chosen else ''}'>{head}"
+                        f"<div class='pc-sigma'>σ {r['std']:.{nd + 1}f} <span class='gk-help'>?</span></div>"
+                        f"<div class='gk-svg'>{svg}</div><div class='pc-foot'>{grade} : {r['mean']:.{nd}f}</div></div>",
+                        unsafe_allow_html=True)
+        st.button(" ", key=f"pcbtn_{f}", on_click=pick_pc, args=(f,),
+                  help=f"누르면 {name} 시계열을 오른쪽에 크게 보여줘요. {tip}")
+
+
+def pc_section(df: pd.DataFrame):
+    """🔥 공정 조건: 카드 4열 격자(공정 순서) + 오른쪽 큰 시계열 (카드를 누르면 바뀜)."""
+    rows = A.process_overview(df)
+    if not rows:
+        return
+    st.markdown("<div class='ov-group'>🔥 공정 조건<span>열연 → 냉연 → 소둔 → 조질·도금 · 카드를 누르면 오른쪽에 시계열</span></div>",
+                unsafe_allow_html=True)
+    have = [r["factor"] for r in rows if r["n"]]
+    if st.session_state.get("pc_factor") not in [r["factor"] for r in rows]:  # 값 없는 카드(OAS)도 고를 수 있다
+        st.session_state["pc_factor"] = "CT" if "CT" in have else (have[0] if have else rows[0]["factor"])
+    left, right = st.columns([1.5, 1], gap="medium")
+    with left.container(key="pcgrid"):  # 카드 줄 사이 간격 16px (theme)
+        for i in range(0, len(rows), 4):
+            cols = st.columns(4, gap="small")
+            for col, r in zip(cols, rows[i:i + 4]):
+                with col:
+                    pc_card(r, df)
+    with right:
+        f = st.session_state["pc_factor"]
+        r = next((x for x in rows if x["factor"] == f), {})
+        name = PROC_LABEL.get(f, factor_label(f))
+        n_rows = -(-len(rows) // 4)
+        card(N.note_process_ts(coils, f, r.get("aim"), name),
+             C.process_timeseries(coils, f, (args["start"], args["end"]), r.get("aim"), name), "pc_big", emoji="📈",
+             help_key="trend", height=max(158 * n_rows - 40, 260))
+
+
+SHARE_COLORS = ["#1D4ED8", "#3B82F6", "#60A5FA", "#93C5FD", "#BFDBFE", "#CBD5E1"]
+
+
+def share_bar(s: pd.Series, top: int = 4) -> str:
+    """값 비율 가로 막대 + 범례 (기본 정보 그림, prd_v8 B1)."""
+    vc = s.dropna().astype(str).value_counts()
+    if vc.empty:
+        return "<div class='ov-none'>값 없음</div>"
+    if len(vc) > top:
+        vc = pd.concat([vc.iloc[:top], pd.Series({"기타": vc.iloc[top:].sum()})])
+    pct = 100 * vc / vc.sum()
+    segs = "".join(f"<span style='width:{p_:.1f}%;background:{SHARE_COLORS[i % len(SHARE_COLORS)]}' "
+                   f"title='{escape(str(k))} {n:,} ({p_:.0f}%)'></span>" for i, (k, n, p_) in enumerate(zip(vc.index, vc.values, pct)))
+    legend = "".join(f"<span><i style='background:{SHARE_COLORS[i % len(SHARE_COLORS)]}'></i>{escape(str(k))} {p_:.0f}%</span>"
+                     for i, (k, p_) in enumerate(zip(vc.index, pct)))
+    return f"<div class='ov-bar'>{segs}</div><div class='ov-legend'>{legend}</div>"
+
+
+def month_bars(df: pd.DataFrame, n: int = 24) -> str:
+    """최근 n개월 코일 수 작은 막대."""
+    m = df.groupby("month").size().iloc[-n:]
+    if m.empty:
+        return ""
+    top, w = max(int(m.max()), 1), 100 / len(m)
+    bars = "".join(f"<rect x='{i * w:.2f}' y='{30 - 28 * v / top:.1f}' width='{w * 0.8:.2f}' height='{28 * v / top:.1f}' "
+                   f"fill='#60A5FA'><title>{k} {v:,}코일</title></rect>" for i, (k, v) in enumerate(m.items()))
+    return f"<svg viewBox='0 0 100 30' preserveAspectRatio='none' width='100%' height='30'>{bars}</svg>"
+
+
+def overview_groups(df: pd.DataFrame) -> list[tuple[str, str, list[str]]]:
+    """🏷 기본 정보 묶음 (그림 타일, 엑셀 값만): [(제목, 작은 설명, [타일 HTML])]."""
+    if df.empty:
+        return []
+
+    def tile(title, body, sub=""):
+        return (f"<div class='ov-tile'><div class='ov-t'>{escape(title)}</div>{body}"
+                + (f"<div class='ov-sub'>{sub}</div>" if sub else "") + "</div>")
+
+    prod = []
+    tons = df["weight"].sum() if "weight" in df else None
+    prod.append(tile("생산", f"<div class='ov-num'>{len(df):,}<small>코일</small></div>{month_bars(df)}",
+                     escape(f"{df['prod_date'].min()} ~ {df['prod_date'].max()}" + (f" · {tons:,.0f}톤" if tons else ""))))
+    sp = A.excel_spec(df)
+    chips = "".join(f"<span class='ov-chip'>{PROP_SHORT.get(q, q)} {'' if lo is None else f'{lo:g}'}~{'' if hi is None else f'{hi:g}'}</span>"
+                    for q, (lo, hi) in sp.items())
+    prod.append(tile("SPEC", f"<div class='ov-chips'>{chips or '<span class=ov-none>엑셀에 SPEC 값 없음</span>'}</div>"))
+    for col, name, unit in (("thk", "두께", "mm"), ("width", "폭", "mm")):
+        if col in df and df[col].notna().sum() >= 3:
+            v = df[col].dropna()
+            svg = C.mini_hist_svg(v, (None, None), None, w=200, h=34).replace(
+                "<svg width='200' height='34'", "<svg width='100%' height='34' preserveAspectRatio='none'")
+            main = f"주력 {df['thk_band'].value_counts().idxmax()}" if col == "thk" and "thk_band" in df else ""
+            prod.append(tile(name, f"<div class='ov-num sm'>{v.min():g}~{v.max():g}<small>{unit}</small></div>{svg}", escape(main)))
+    lines = [tile(name, share_bar(df[col])) for col, name in
+             (("line", "라인"), ("plant", "공장"), ("spec_roll", "압연규격약호"), ("spec_fin", "정정규격약호"),
+              ("aim", "출강목표"), ("use_code", "용도코드")) if col in df and df[col].notna().any()]
+    return [("📦 생산 · 제품", "코일 수 · SPEC · 두께 · 폭", prod),
+            ("🏭 라인 · 규격 · 용도", "코일 수 비율 (상위 4 + 기타)", lines)]  # 🔥 공정 조건은 pc_section (카드 클릭 → 오른쪽 시계열)
+
+
+def overview_card():
+    """🏷 기본 정보 (prd_v8 B1·B2): 엑셀 값을 묶음별 그림 타일로. 모든 카드 같은 크기(4열 격자)."""
+    df = coils if full_period else target
+    st.markdown("<div class='sec-title'>🏷 기본 정보<span class='sec-desc'>엑셀(회사 양식) 값 · 재질 · 공정 조건 분포</span></div>",
+                unsafe_allow_html=True,
+                help=f"{T.CARD_HELP['overview']}\n\n{T.CARD_HELP['kpi']}\n\n{T.CARD_HELP['process_mini']}")
+    groups = overview_groups(df)
+    if not groups:
+        st.caption("조건에 맞는 코일이 없어요")
+    for title, desc, cells in groups:
+        if not cells:
+            continue
+        st.markdown(f"<div class='ov-group'>{title}<span>{desc}</span></div><div class='ov-grid'>{''.join(cells)}</div>",
+                    unsafe_allow_html=True)  # (?)는 기본 정보 제목 하나로 (격자 폭이 묶음마다 같게)
+    if groups:
+        gk_section()  # 🧪 재질: 카드 클릭 → 오른쪽 큰 분포
+        pc_section(df)  # 🔥 공정 조건: 카드 클릭 → 오른쪽 시계열
 
 
 def view_material():
-    # ① 생산량
-    section("production")
-    yearly, by_grade = A.production(coils)
-    c1, c2 = st.columns(2)
-    with c1:
-        def stack_toggle():
-            st.toggle("규격별", key="prod_by_grade", help="켜면 강종 필터와 상관없이 전체 냉연규격의 연도별 생산량을 쌓아 보여줘요.")
-        if st.session_state.get("prod_by_grade"):
-            yearly_all, by_grade = A.production(A.filter_coils(None, args["line"], **sub))
-            card(N.note_production(yearly_all, "전체 강종"), C.production(yearly_all, by_grade), "prod", stack_toggle,
-                 emoji="📦", help_key="production")
-        else:
-            card(N.note_production(yearly, grade), C.production(yearly), "prod", stack_toggle, emoji="📦",
-                 help_key="production")
-    with c2:
-        card(N.note_production_monthly(coils), C.production_monthly(coils, (args["start"], args["end"])), "prodm",
-             emoji="🗓", help_key="production_monthly")
-    # ② 재질현황 (+ 🚨 조기 감시)
-    section("material")
-    if len(shown) > 3:  # 재질이 많으면 재질별 접기
-        for q in shown:
-            with st.expander(f"🧪 {PROP_LABEL[q]}", expanded=q == prop):
-                material_pair(q)
-    else:
-        for q in shown:
-            material_pair(q)
-    if spc_res and "error" not in spc_res:
-        def spc_controls():
-            a, b = st.columns([1, 1.25])
-            with a:
-                prop_pick("d_prop")()
-            with b:
-                spc_settings()
-        card(N.note_spc(spc_res), C.spc_chart(spc_res, sp), "spc", spc_controls, help_key="spc", height=SPC_H)
-    elif spc_res:
-        st.info(spc_res["error"], icon=":material/info:")
-    c3, c4 = st.columns(2)
-    with c3:
-        hm = A.overview_heatmap(prop, args["line"], where=sub["where"])
-        card(N.note_heatmap(hm, prop), C.heatmap(hm, prop), "heat", emoji="🗺", help_key="heatmap")
-    with c4:
-        if "r0" in coils and coils["r0"].notna().any():
-            g, r = (group, ref) if full_period else (target, baseline)
-            card(N.note_rvalue(g, r, group_name, ref_name),
-                 C.rvalue_box(g, r, group_name, ref_name, group_color if full_period else C.direction_color(judge)),
-                 "rval", emoji="🧭", help_key="rvalue")
-    # ③ 두께별 재질현황
-    section("thickness")
-    if len(shown) > 3:
-        for q in shown:
-            with st.expander(f"📏 {PROP_LABEL[q]}", expanded=q == prop):
-                thickness_pair(q)
-    else:
-        for q in shown:
-            thickness_pair(q)
+    overview_card()  # 재질 카드(🧪)는 기본 정보 안 공정 조건 위
 
 
 # ---------------------------------------------------------------------------
 # ⚙️ 공정분석 (prd_v5 T4)
 # ---------------------------------------------------------------------------
-def go_spc():
-    st.session_state["d_view"] = "재질개요"
-
-
 def view_cause():
     st.caption(T.DESC["공정분석"])
-    t1, t2, t3 = st.columns([1.1, 1, 1.6])
-    if len(shown) > 1:
-        t1.selectbox("분석 재질", shown, key="d_prop", format_func=lambda q: PROP_LABEL.get(q, q),
-                     help="원인 분석·조기 감시 기준 재질 (위에서 고른 재질 중)")
-    else:
-        t1.markdown(f"<div class='tab-summary' style='text-align:left'>분석 재질 <b>{PROP_LABEL[prop]}</b></div>",
-                    unsafe_allow_html=True)
-    t2.selectbox("문제 코일 기준 (전체 기간일 때)", ds.SIGMAS, key="d_sigma", format_func=lambda s: f"평균 ± {s:.1f}σ",
-                 disabled=not full_period, help=T.CARD_HELP["sigma"])
+    t1, t0, t2, t3 = st.columns([1.1, 1.0, 1, 1.5])
+    t1.selectbox("분석 재질", shown, key="d_prop", format_func=lambda q: PROP_LABEL.get(q, q),
+                 help="원인 분석·조기 감시 기준 재질 (데이터가 있는 재질, 기본 TS)")
+    t0.radio("불량 코일 기준", list(ds.BASES), key="d_basis", horizontal=True, format_func=ds.BASES.get,
+             disabled=not full_period, help=T.CARD_HELP["basis"])
+    t2.selectbox("σ 수준 (전체 기간일 때)", ds.SIGMAS, key="d_sigma", format_func=lambda s: f"평균 ± {s:.1f}σ",
+                 disabled=not full_period or state["basis"] == "spec", help=T.CARD_HELP["sigma"])
     t3.radio(f"{T.t('side_label')}", list(ds.SIDES), key="d_side", horizontal=True,
              format_func=lambda s: T.t(f"side_{s}"), help=T.HELP["group_outlier"], disabled=not full_period)
     info = []
     if full_period:
-        info.append(f"문제 코일 **{len(group):,}개** ({100 * len(group) / max(len(coils), 1):.0f}%) vs {ref_name} {len(ref):,}개"
+        sigma_tag = " (σ 기준)" if state["basis"] == "sigma" or A.basis_fallback(coils, grade, prop, state["basis"]) else ""
+        info.append(f"불량 코일{sigma_tag} **{len(group):,}개** ({100 * len(group) / max(len(coils), 1):.0f}%) vs {ref_name} {len(ref):,}개"
                     + (" · ⚠️ 10개 미만이라 결론을 믿기 어려워요" if len(group) < 10 else ""))
     b1, b2 = st.columns([3, 1.2], vertical_alignment="center")
     b1.markdown(" · ".join(info) if info else f"{mode_txt} · {group_name} {len(group):,}개 vs {ref_name} {len(ref):,}개")
     if (alarm := N.spc_badge(spc_res)):
-        b2.button(alarm, on_click=go_spc, key="spc_badge", type="tertiary", help="누르면 📊 재질개요의 🚨 조기 감시 카드로 가요")
+        b2.markdown(f"<div class='tab-summary' style='opacity:1'>{escape(alarm)} ↓</div>", unsafe_allow_html=True,
+                    help="아래 🚨 조기 감시 카드(체크리스트 위)에서 자세히 봐요")
     if comp.get("model_note"):
         st.info(comp["model_note"], icon=":material/info:")
+    if full_period and (note := A.basis_fallback(coils, grade, prop, state["basis"])):
+        st.caption(f"⚠️ {note}")
 
     def model_pick():
         st.selectbox("순위 계산 방법", list(MODELS), key="d_model", format_func=MODELS.get, label_visibility="collapsed",
@@ -592,6 +656,10 @@ def view_cause():
     with c4:
         card(N.note_confounders(comp), C.confounders(comp["confounders"], group_color, group_name, ref_name), "conf",
              extra=confounder_buttons, emoji="⚖️", help_key="confounder")
+    if spc_res and "error" not in spc_res:  # 🚨 조기 감시 (강종개요 → 공정분석, 체크리스트 위)
+        card(N.note_spc(spc_res), C.spc_chart(spc_res, sp), "spc", spc_settings, help_key="spc", height=SPC_H)
+    elif spc_res:
+        st.info(spc_res["error"], icon=":material/info:")
     with st.container(border=True):
         st.markdown(TH.card_title("✅ 공정제어 체크리스트"), unsafe_allow_html=True, help=T.CARD_HELP["checklist"])
         for a in ins["actions"] or ["눈에 띄는 원인 후보가 없어요. 시험 조건부터 확인해 보세요."]:
@@ -622,8 +690,16 @@ def view_cause():
 def view_defect():
     st.caption(T.DESC["결함분석"])
     pareto = A.defect_pareto(grade, args["line"], args["start"], args["end"], **sub)
-    known = [d for d in DEFECTS if d in set(pareto["defect"])] + [d for d in DEFECTS if d not in set(pareto["defect"])]
-    if st.session_state["d_defect"] not in DEFECTS:
+    known = list(pareto["defect"]) + [d for d in DEFECTS if d not in set(pareto["defect"])]  # 발생률 순
+    # 처음 열 때·강종/기간/필터가 바뀔 때는 발생률 1위 결함을 고른다. 직접 고른 결함(같은 조건 동안)·링크·AI가 고른 결함은 유지
+    sig = f"{grade}|{args['line']}|{args['start']}|{args['end']}|{sub}"
+    if st.session_state.pop("defect_pinned", False):
+        st.session_state["defect_sig"] = sig
+    if st.session_state.get("defect_sig") != sig:
+        st.session_state["defect_sig"] = sig
+        if not pareto.empty:
+            st.session_state["d_defect"] = pareto["defect"].iloc[0]
+    if st.session_state["d_defect"] not in known:
         st.session_state["d_defect"] = known[0]
     dt = st.session_state["d_defect"]
 
@@ -661,7 +737,7 @@ def view_defect():
 
 
 # ---------------------------------------------------------------------------
-# 🗂 데이터 (prd_v5 T6): 엑셀처럼 고치기 · 행 제외 · 이상치 도우미 · 수정본
+# 🗂 데이터 (prd_v7 D1): v4 Raw Data 복원 — 회사 양식 열 이름, 열마다 필터·정렬, CSV/Excel
 # ---------------------------------------------------------------------------
 def pds_names() -> dict:
     """표준 컬럼 → 회사 양식 원래 열 이름 (같은 이름이 여러 공정에 있으면 공정명을 앞에)."""
@@ -674,117 +750,36 @@ def pds_names() -> dict:
             for std, (block, base) in first.items()}
 
 
-KEY_COLS = ["coil_no", "grade", "prod_date", "line", "plant", "thk", "YS", "TS", "EL", "defect_type"]
-PAGE = 2000
-
-
-def _edit_state() -> dict:
-    """편집 상태 (데이터 파일마다): draft = 지금 편집, snap = 표를 그릴 때 기준, hist = 되돌리기용."""
-    es = st.session_state.get("edit_draft")
-    if not es or es.get("src") != SOURCE_KEY:
-        es = {"src": SOURCE_KEY, "draft": E.empty(), "snap": E.empty(), "hist": [], "ver": 0}
-        st.session_state["edit_draft"] = es
-    return es
-
-
-def _reset_editor(es: dict, draft: dict, push: bool = True):
-    if push:
-        es["hist"].append(E.clone(es["draft"]))
-    es["draft"], es["snap"] = draft, E.clone(draft)
-    es["ver"] += 1
-
-
 def view_data():
     st.caption(T.DESC["데이터"])
-    es = _edit_state()
+    apply_filter = st.toggle("대시보드 필터 적용", value=True)
+    raw = (target if apply_filter else A.all_coils()).drop(
+        columns=["month", "thk_band", "has_defect", "passed", "rbar_given"], errors="ignore")
     names = pds_names()
-    allc = A.all_coils()
-    big = len(allc) >= 50000
-    d1, d2, d3 = st.columns([1.2, 2.6, 1.2], vertical_alignment="bottom")
-    apply_filter = d1.toggle("대시보드 필터 적용", value=True, disabled=big,
-                             help="큰 데이터(5만 행 이상)는 화면이 느려지지 않게 필터 결과만 편집해요." if big else None)
-    base = (target if apply_filter or big else allc).drop(columns=["month", "thk_band", "has_defect", "passed",
-                                                                   "rbar_given"], errors="ignore")
-    numeric = [c for c in base.columns if pd.api.types.is_numeric_dtype(base[c]) and c not in E.LOCKED]
-    default_cols = [c for c in KEY_COLS if c in base.columns] + [q for q in shown if q in base.columns and q not in KEY_COLS]
-    cols = d2.multiselect("보여줄 열", list(base.columns), default=default_cols, key="data_cols",
-                          format_func=lambda c: names.get(c, c), help="편집할 열만 골라 보면 빨라요. 번호 열은 고칠 수 없어요.")
-    cols = ["coil_no"] + [c for c in cols if c != "coil_no"]
-    # 이상치 도우미
-    with st.container(border=True):
-        st.markdown(TH.card_title("🔍 이상치 도우미"), unsafe_allow_html=True, help=T.CARD_HELP["data"])
-        o1, o2, o3, o4 = st.columns([1.6, 0.9, 1.2, 1.3], vertical_alignment="bottom")
-        cand = [q for q in grade_props if q in base] + [f for f in numeric if f not in grade_props]
-        ocol = o1.selectbox("재질·인자", cand, key="out_col",
-                            format_func=lambda c: PROP_SHORT.get(c) or (factor_label(c) if c in FACTORS else names.get(c, c)))
-        k = o2.number_input("평균 ± kσ", 1.0, 6.0, 3.0, 0.5, key="out_k")
-        shown_df = E.apply(base, es["draft"])
-        mask = E.outlier_mask(shown_df, ocol, k, SPEC.get(ocol, (None, None)))
-        only = o3.toggle(f"이상치만 보기 ({int(mask.sum())}행)", key="out_only")
-        if o4.button(f"표시된 {int(mask.sum())}행 제외", disabled=not mask.any(), width="stretch", key="out_drop"):
-            _reset_editor(es, E.exclude(es["draft"], shown_df.loc[mask, "coil_no"]))
-            st.rerun()
-    # 편집 표
-    table = E.apply(base, es["snap"], drop_excluded=False)
-    if only:
-        bad_ids = set(shown_df.loc[mask, "coil_no"].astype(str))
-        table = table[table["coil_no"].astype(str).isin(bad_ids)]
-    table = table[["제외"] + [c for c in cols if c in table.columns]].reset_index(drop=True)
-    pages = max(1, -(-len(table) // PAGE))
-    page = d3.number_input(f"쪽 (1~{pages})", 1, pages, 1, key="data_page") if pages > 1 else 1
-    view = table.iloc[(page - 1) * PAGE: page * PAGE].reset_index(drop=True)
-    cfg = {"제외": st.column_config.CheckboxColumn("제외", help="체크하면 분석에서 빠져요", width="small")}
-    for c in view.columns[1:]:
-        cfg[c] = st.column_config.Column(names.get(c, c), disabled=c in E.LOCKED)
-    edited = st.data_editor(view, column_config=cfg, hide_index=True, height=480, width="stretch",
-                            key=f"editor_{es['ver']}_{page}_{only}")
-    new = E.diff(view, edited, es["draft"], original=base)
-    if new != es["draft"]:
-        es["hist"].append(E.clone(es["draft"]))
-        es["draft"] = new
-    n_total = E.count(es["draft"])
-    st.caption(f"{len(table):,}행 · 바뀐 것: **{E.summary(es['draft'])}**")
-    a1, a2, a3, a4, a5 = st.columns(5)
-    if a1.button("✅ 분석에 반영", type="primary", width="stretch", disabled=n_total == 0,
-                 help="수정본을 새 데이터 파일로 추가하고 모든 탭을 다시 계산해요. 원본은 그대로예요."):
-        src = E.edited_source(get_source(), es["draft"])
-        src.edit_log = E.log_rows(es["draft"]).to_dict("records")
-        datasets.register(src, src.name, keep=st.session_state.get("edit_keep", False))
-        st.session_state["pending"] = state_now()  # 수정본으로 바꿔도 보던 필터·탭은 그대로
-        st.session_state["toast"] = f"수정본 '{src.name}'으로 다시 계산했어요."
-        st.rerun()
-    if a2.button("↶ 한 단계 되돌리기", width="stretch", disabled=not es["hist"]):
-        _reset_editor(es, es["hist"].pop(), push=False)
-        st.rerun()
-    if a3.button("⟲ 전체 되돌리기", width="stretch", disabled=n_total == 0):
-        _reset_editor(es, E.empty())
-        st.rerun()
-    a4.toggle("이 PC에 보관", key="edit_keep", help="켜면 수정본을 사용자 폴더에 저장해 앱을 다시 켜도 남아요.")
-    xkey = (SOURCE_KEY, E.summary(es["draft"]), len(es["hist"]))
-    if st.session_state.get("edit_xlsx", (None,))[0] != xkey:  # 3만 행 Excel은 무거워서 누를 때만 만든다
-        if a5.button("Excel 만들기", width="stretch", icon=":material/table_view:", help="지금 편집 내용을 적용한 전체 데이터"):
-            out = E.apply(get_source().coils, es["draft"]).drop(columns=["month", "thk_band", "has_defect", "passed"],
-                                                                 errors="ignore")
+    raw = raw.rename(columns={c: names.get(c, c) for c in raw.columns})
+    raw = raw.loc[:, ~raw.columns.duplicated()]
+    gb = GridOptionsBuilder.from_dataframe(raw)
+    gb.configure_default_column(filter=True, sortable=True, resizable=True, floatingFilter=True, minWidth=90)
+    gb.configure_column(names.get("coil_no", "coil_no"), pinned="left")
+    gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=50)
+    grid = AgGrid(raw, gridOptions=gb.build(), height=560, update_on=["filterChanged", "sortChanged"],
+                  show_download_button=False, key="raw_grid")
+    shown_rows = pd.DataFrame(grid.data) if grid is not None and grid.data is not None else raw
+    st.caption(f"필터 결과 {len(shown_rows):,}행 / 전체 {len(raw):,}행")
+    d1, d2 = st.columns(2)
+    d1.download_button("CSV 다운로드", shown_rows.to_csv(index=False).encode("utf-8-sig"),
+                       "coil_filtered.csv", "text/csv", width="stretch", icon=":material/download:")
+    if st.session_state.get("raw_xlsx_key") != (SOURCE_KEY, len(shown_rows)):  # Excel은 무거워서 누를 때 만든다
+        if d2.button("Excel 만들기", width="stretch", icon=":material/table_view:"):
             buf = io.BytesIO()
             with st.spinner("Excel 만드는 중…"):
-                out.rename(columns={c: names.get(c, c) for c in out.columns}).loc[:, lambda d: ~d.columns.duplicated()] \
-                    .to_excel(buf, index=False)
-            st.session_state["edit_xlsx"] = (xkey, buf.getvalue())
+                shown_rows.to_excel(buf, index=False)
+            st.session_state["raw_xlsx"], st.session_state["raw_xlsx_key"] = buf.getvalue(), (SOURCE_KEY, len(shown_rows))
             st.rerun()
     else:
-        a5.download_button("Excel 다운로드", st.session_state["edit_xlsx"][1], f"{grade}_수정본.xlsx",
-                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch",
-                           icon=":material/download:")
-    log = E.log_rows(es["draft"])
-    prev = getattr(get_source(), "edit_log", None)
-    with st.expander(f"📝 기록 ({len(log)}건)" + (f" · 이 수정본의 기록 {len(prev)}건" if prev else ""), expanded=False):
-        if len(log):
-            st.dataframe(log, hide_index=True, width="stretch")
-        if prev:
-            st.caption("지금 보고 있는 수정본을 만들 때의 기록")
-            st.dataframe(pd.DataFrame(prev), hide_index=True, width="stretch")
-        if not len(log) and not prev:
-            st.caption("아직 바꾼 것이 없어요.")
+        d2.download_button("Excel 다운로드", st.session_state["raw_xlsx"], "coil_filtered.xlsx",
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           width="stretch", icon=":material/download:")
 
 
 def fmt(v, sign=False) -> str:
@@ -866,7 +861,7 @@ def suggestions(view: str) -> list[str]:
     word = PROP_WORD.get(prop, PROP_SHORT[prop])
     month += {"CAL": "CAL ", "CGL_GA": "CGL "}.get(state["line"], "")  # 보고 있는 라인도 질문에 (오프라인 해석기가 알아듣는 말)
     out = []
-    if view == "재질개요":
+    if view == "강종개요":
         a = spc_res.get("first_alarm") if spc_res else None
         if a and int(a["date"][:4]) == hi.year:
             out.append(f"{int(a['date'][5:7])}월 {grade} {word} 원인이 뭐야?")
@@ -889,33 +884,64 @@ def suggestions(view: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # 화면
 # ---------------------------------------------------------------------------
+# 상단바 (prd_v8 U1·U2): 한 줄을 맨 위에 고정 — 탭 / 🤖 AI 보고서 · 코일 수 | 강종 · ◐ · 🔑 · 모드 · 🔗
+
+
+def mode_switch():  # AI on/off 스위치 하나 (끄면 오프라인 · 외부 통신 없음)
+    st.session_state["ai_toggle"] = st.session_state.get("run_mode") == "ai"
+    with st.container(key="ai_switch"):
+        st.toggle(":material/smart_toy: AI", key="ai_toggle", on_change=on_mode, help=T.CARD_HELP["mode"])
+
+
+with st.container(key="tabbar"):
+    with st.container(key="tabrow", horizontal=True, horizontal_alignment="distribute", vertical_alignment="center"):
+        view = st.segmented_control("화면", ds.VIEWS, key="d_view", label_visibility="collapsed", width="content",
+                                    format_func=lambda v: f"{ds.VIEW_ICON[v]} {v}") or "강종개요"
+        tools = st.container(key="tools", horizontal=True, horizontal_alignment="right", vertical_alignment="center",
+                             gap="small", width="content")
+    with tools:
+        open_report = st.button(":material/smart_toy: AI 보고서", type="primary", width="content", key="ai_report_btn",
+                                help="회사 PPT 양식으로 그래프 위주 보고서 (항목 선택·미리보기·다운로드, 장수 제한 없음). AI 모드면 문장을 AI가 써요.")
+        st.markdown(f"<div class='tab-summary'>{len(coils):,}코일 | {grade}</div>", unsafe_allow_html=True, width="content")
+        header.toolbar(THEME, session.query_dict(state, DEFAULTS, False), mode_switch)
+
+
+# 제목 + 조건 칩 (prd_v8 U3): ✕를 누르면 그 필터만 기본값으로 (사이드바 값도 바뀜)
+def clear_filter(keys: tuple):
+    for k in keys:
+        st.session_state[f"d_{k}"] = DEFAULTS[k]
+    if "start" in keys:
+        st.session_state["d_period"] = (DEFAULTS["start"], DEFAULTS["end"])
+
+
+def filter_chips() -> list[tuple[str, tuple]]:
+    chips = []
+    if not full_period:
+        chips.append((period_txt, ("start", "end")))
+    if state["line"] != "전체":
+        chips.append((f"라인 {state['line']}", ("line",)))
+    for k, label in ds.CODE_FILTERS.items():
+        if state.get(k):
+            chips.append((f"{label} {', '.join(ds.spec_label(v) if k == 'specs' else v for v in state[k])}", (k,)))
+    if sub["thk_min"] is not None or sub["thk_max"] is not None:
+        chips.append((f"두께 {state['thk_min']:g}~{state['thk_max']:g}mm", ("thk_min", "thk_max")))
+    if sub["coil_pos"]:
+        chips.append((ds.COIL_POS[sub["coil_pos"]], ("coil_pos",)))
+    return chips
+
+
 with st.container(key="hdr"):
-    open_report = header.render(f"{grade} 품질 현황", THEME, session.query_dict(state, DEFAULTS, False))
-edited_note = getattr(get_source(), "edit_note", None)
-st.markdown(f"{mode_badge()} {source_badge()}" + (f" :violet-badge[✏️ 수정본 ({edited_note})]" if edited_note else ""))
-st.markdown(f":gray-badge[라인 {state['line']}] :gray-badge[{period_txt}] "
-            + " ".join(f":gray-badge[{x}]" for x in filter_txt)
-            + f" :gray-badge[{mode_txt}]" + (f" {badge(judge)}" if diag["n_baseline"] else ""))
+    st.title(f"{grade} 품질 현황")
+    with st.container(key="chips", horizontal=True, vertical_alignment="center"):
+        st.markdown(f"<span class='chip fixed'>냉연규격 {grade}</span>", unsafe_allow_html=True)
+        for i, (label, keys) in enumerate(filter_chips()):
+            st.button(f"{label}  ✕", key=f"chip_{i}", on_click=clear_filter, args=(keys,), type="tertiary",
+                      help="이 조건 지우기")
+        edited_note = getattr(get_source(), "edit_note", None)
+        st.markdown(f"{mode_badge()} {source_badge()}" + (f" :violet-badge[✏️ 수정본 ({edited_note})]" if edited_note else "")
+                    + (f" {badge(judge)}" if diag["n_baseline"] else ""))
 if expired_msg:
     st.warning(expired_msg, icon=":material/history:")
-
-# 큰 탭 + 상단 고정바 (prd_v4 M8 → prd_v5 T1·T3·H2): 탭 · 조건 · 오프라인/AI 모드, 아래 재질 고정카드
-st.session_state.setdefault("_last_mode", st.session_state["run_mode"])
-with st.container(key="tabbar"):
-    tb1, tb2, tb3 = st.columns([4.4, 1.25, 1.9], vertical_alignment="center")
-    view = tb1.segmented_control("화면", ds.VIEWS, key="d_view", label_visibility="collapsed",
-                                 format_func=lambda v: f"{ds.VIEW_ICON[v]} {v}") or "재질개요"
-    tb2.markdown(f"<div class='tab-summary'>{grade} · {period_txt if full_period else period_txt.replace(' ~ ', '~')}"
-                 f"{' · ' + state['line'] if state['line'] != '전체' else ''} · {PROP_SHORT[prop]}</div>",
-                 unsafe_allow_html=True)
-    tb3.segmented_control("모드", list(router.MODE_LABEL), key="run_mode", format_func=MODE_TEXT.get,
-                          label_visibility="collapsed", on_change=on_mode, help=T.CARD_HELP["mode"])
-    if view in ("재질개요", "공정분석") and not target.empty:
-        m1, m2 = st.columns([1.75, 6], vertical_alignment="center")
-        m1.pills("재질", grade_props, key="d_props", selection_mode="multi", format_func=lambda q: PROP_SHORT.get(q, q),
-                 on_change=on_material, label_visibility="collapsed", help="여러 개 고를 수 있어요. 다 끄면 TS로 보여줘요.")
-        with m2:
-            kpi_strip()
 
 if view == "코일분석":  # 필터와 별개로 번호로 조회
     st.caption(T.DESC["코일분석"])
@@ -925,7 +951,7 @@ elif target.empty:
             "기간·규격약호·출강목표·용도코드·두께를 바꿔 보세요.", icon=":material/search_off:")
     st.button("필터 초기화", on_click=reset_filters, key="reset_empty", icon=":material/restart_alt:")
 else:
-    {"재질개요": view_material, "공정분석": view_cause, "결함분석": view_defect}.get(view, view_data)()
+    {"강종개요": view_material, "공정분석": view_cause, "결함분석": view_defect}.get(view, view_data)()
 
 if open_report:
     if target.empty:

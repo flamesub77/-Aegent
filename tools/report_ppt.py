@@ -1,4 +1,4 @@
-"""AI 보고서 (prd_v4 P1 → prd_v5 R1): files/PPT 양식.pptx로 그래프 위주 2~3장.
+"""AI 보고서 (prd_v4 P1 → prd_v5 R1): files/PPT 양식.pptx로 그래프 위주, 한 장에 그래프 2개 (장수 제한 없음).
 
 v5: 양식 틀·현대하모니 유지 + 첫 장 KPI 타일 띠, 구역 색 부제목 탭, 쪽 번호, 표 스타일(숫자 오른쪽·기준 미달 빨강).
 AI 모드면 패널 해석·다음 조치 문장을 AI가 쓴다 (ctx["ai_text"], 숫자는 분석 결과만 넘김). 이모지 대신 색 막대.
@@ -28,7 +28,7 @@ TEMPLATE = config.DATA_DIR / "PPT 양식.pptx"
 FONT_DIR = config.BASE_DIR / "static"
 PPT_FONT = {"L": "HDharmony L", "M": "HDharmony M", "B": "HDharmony B"}  # PPT 글자 (받는 PC에 설치된 글꼴 이름)
 BLUE, DARK, ORANGE, GRAY, RED = "#3B82F6", "#1E3A8A", "#EA7A2C", "#B6C2D2", "#DC2626"
-MIN_ITEMS, MAX_ITEMS = 4, 6  # 2~3장 × 2개
+MIN_ITEMS = 1  # 장수 제한 없음: 고른 항목 수만큼 (한 장에 2개, 홀수면 마지막 칸에 요약)
 # 구역 색 (prd_v5 R1): 부제목 탭과 미리보기 탭 색
 SECTION_COLOR = {"summary": "1E3A8A", "production": "0284C7", "distribution": "1D4ED8", "monthly": "1D4ED8",
                  "thickness": "7C3AED", "spc": "EA7A2C", "ranking": "0F766E", "scatter": "0F766E", "defect": "DC2626",
@@ -327,9 +327,7 @@ def available(ctx: dict) -> list[str]:
 
 def check_count(n: int) -> str | None:
     if n < MIN_ITEMS:
-        return f"2장을 채우려면 {MIN_ITEMS - n}개 이상 더 골라 주세요 (2~3장, 한 장에 그래프 2개)."
-    if n > MAX_ITEMS:
-        return f"3장까지라 {MAX_ITEMS}개만 고를 수 있어요."
+        return "넣을 항목을 하나 이상 골라 주세요."
     return None
 
 

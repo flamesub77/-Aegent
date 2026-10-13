@@ -27,7 +27,7 @@ def pl(prop: str) -> str:
 
 
 def direction_color(judgement_or_side: str | None) -> str:
-    """판정(상향/하향 ...) 또는 문제 코일 방향(high/low)을 색으로."""
+    """판정(상향/하향 ...) 또는 불량 코일 방향(high/low)을 색으로."""
     v = judgement_or_side or ""
     if v.startswith("상향") or v == "high":
         return UP
@@ -98,7 +98,8 @@ def histogram(target: pd.DataFrame, baseline: pd.DataFrame, prop: str, spec, tar
                    xaxis_title=pl(prop), yaxis_title="비율 (%)")
 
 
-def monthly_box(df: pd.DataFrame, prop: str, spec, period=(None, None), color=GROUP):
+def monthly_box(df: pd.DataFrame, prop: str, spec, period=(None, None), color=GROUP, defect_line: bool = False):
+    """월별 상자그림. defect_line이면 월별 스펙 불량률(%) 선을 오른쪽 축에 겹친다 (prd_v6 M4)."""
     if df.empty:
         return empty(f"월별 {prop} 추이")
     fig = go.Figure()
@@ -108,8 +109,19 @@ def monthly_box(df: pd.DataFrame, prop: str, spec, period=(None, None), color=GR
         fig.add_box(y=g[prop], name=month, marker_color=color if selected else BASE,
                     boxmean=True, showlegend=False)
     _spec_lines(fig, spec, axis="y")
+    lo, hi = spec
+    extra = {}
+    if defect_line and (lo is not None or hi is not None):
+        v = df[prop]
+        bad = ((v < lo) if lo is not None else False) | ((v > hi) if hi is not None else False)
+        rate = df.assign(_bad=bad, _has=v.notna()).groupby("month").apply(
+            lambda g: 100 * g["_bad"].sum() / max(g["_has"].sum(), 1), include_groups=False)
+        fig.add_scatter(x=rate.index, y=rate.values, yaxis="y2", mode="lines+markers", name="불량률(%)",
+                        line=dict(color=SPEC, width=1.6), marker=dict(size=4),
+                        hovertemplate="%{x} 불량률 %{y:.1f}%<extra></extra>")
+        extra = dict(yaxis2=dict(title="불량률 (%)", overlaying="y", side="right", showgrid=False, rangemode="tozero"))
     note = " · 색칠 = 선택 기간" if (start or end) else ""
-    return _layout(fig, f"월별 {PROP_SHORT.get(prop, prop)} 추이{note}", yaxis_title=pl(prop))
+    return _layout(fig, f"월별 {PROP_SHORT.get(prop, prop)} 추이{note}", yaxis_title=pl(prop), **extra)
 
 
 def heatmap(hm: pd.DataFrame, prop: str):
@@ -154,7 +166,7 @@ def contribution(ranking: list[dict], top=10, style=None, score_key="effect_size
     return _layout(fig, title, height=max(300, 32 * len(rows) + 90), xaxis_title=label)
 
 
-def scatter(group: pd.DataFrame, ref: pd.DataFrame, factor: str, prop: str, spec, group_name="문제 코일",
+def scatter(group: pd.DataFrame, ref: pd.DataFrame, factor: str, prop: str, spec, group_name="불량 코일",
             color=GROUP, ref_name="정상 코일"):
     if group.empty and ref.empty:
         return empty(f"{factor_label(factor)} vs {prop}")
@@ -187,7 +199,7 @@ def factor_trend(df: pd.DataFrame, factor: str, period=(None, None), standard=No
                    yaxis_title=f"{factor_label(factor)} ({factor_unit(factor)})")
 
 
-def confounders(conf: dict, color=GROUP, group_name="문제 코일", ref_name="정상 코일"):
+def confounders(conf: dict, color=GROUP, group_name="불량 코일", ref_name="정상 코일"):
     labels = {"thk_band": "두께", "line": "라인", "coil_pos": "시편 위치"}
     ys, xs_g, xs_r = [], [], []
     for col, v in conf.items():
@@ -255,8 +267,8 @@ def rvalue_box(target: pd.DataFrame, baseline: pd.DataFrame, target_name="이 �
     return _layout(fig, "방향별 r값 (r0 · r45 · r90)", boxmode="group", yaxis_title="r값")
 
 
-def coil_position(base: pd.Series, value: float, prop: str, spec, title=None):
-    """양산 분포 위 대상 코일 위치 (세로선)."""
+def coil_position(base: pd.Series, value: float, prop: str, spec, title=None, xlabel=None, standard=None):
+    """양산 분포 위 대상 코일 위치 (세로선). 공정 인자면 xlabel(이름·단위)과 표준조건(standard, 초록 점선)."""
     base = base.dropna()
     if base.empty or value is None:
         return empty(title or PROP_SHORT.get(prop, prop), "양산 데이터 없음")
@@ -265,11 +277,16 @@ def coil_position(base: pd.Series, value: float, prop: str, spec, title=None):
     for v in (lo, hi):
         if v is not None:
             fig.add_vline(x=v, line=dict(color=SPEC, dash="dash", width=1))
+    if standard is not None:
+        fig.add_vline(x=standard, line=dict(color="#16A34A", dash="dash", width=1.2), annotation_text="표준",
+                      annotation_position="top left", annotation_font_size=10)
     med = base.median()
+    fig.add_vline(x=med, line=dict(color="#64748B", dash="dot", width=1.2), annotation_text="양산 중앙값",
+                  annotation_position="bottom right", annotation_font_size=10)
     fig.add_vline(x=value, line=dict(color=UP if value > med else DOWN, width=3),
                   annotation_text="이 코일", annotation_position="top")
-    fig.update_yaxes(visible=False)
-    return _layout(fig, title or pl(prop), height=190, showlegend=False, bargap=0.05)
+    fig.update_yaxes(title_text="코일 수", title_font_size=10)
+    return _layout(fig, title or pl(prop), height=220, showlegend=False, bargap=0.05, xaxis_title=xlabel or pl(prop))
 
 
 PROCESS_ORDER = ["제강", "연주", "열연", "산세", "냉연", "소둔", "도금", "조질"]
@@ -405,15 +422,16 @@ def defect_grade_bar(rows: pd.DataFrame, defect: str, target_name="이 기간", 
                    height=max(280, 46 * len(rows) + 90))
 
 
-def mini_hist_svg(values: pd.Series, spec=(None, None), ref: pd.Series | None = None, w=124, h=44, bins=18) -> str:
+def mini_hist_svg(values: pd.Series, spec=(None, None), ref: pd.Series | None = None, w=124, h=44, bins=18,
+                  mark=None) -> str:
     """재질 요약 카드용 작은 히스토그램 SVG (M5). SPEC 밖 막대 빨강, SPEC 점선, 평균 진한 선. 축·글자 없음."""
     import numpy as np
     v = pd.Series(values).dropna().to_numpy(float)
     if len(v) < 3:
         return ""
     lo, hi = spec
-    edges_lo = min(v.min(), lo if lo is not None else v.min())
-    edges_hi = max(v.max(), hi if hi is not None else v.max())
+    edges_lo = min(v.min(), lo if lo is not None else v.min(), mark if mark is not None else v.min())
+    edges_hi = max(v.max(), hi if hi is not None else v.max(), mark if mark is not None else v.max())
     pad = (edges_hi - edges_lo) * 0.04 or 1
     edges = np.linspace(edges_lo - pad, edges_hi + pad, bins + 1)
     cnt, _ = np.histogram(v, edges)
@@ -438,6 +456,9 @@ def mini_hist_svg(values: pd.Series, spec=(None, None), ref: pd.Series | None = 
             parts.append(f"<line x1='{sx(s):.1f}' x2='{sx(s):.1f}' y1='0' y2='{h}' stroke='{SPEC}' stroke-dasharray='3,2' "
                          f"stroke-width='1.2'/>")
     parts.append(f"<line x1='{sx(v.mean()):.1f}' x2='{sx(v.mean()):.1f}' y1='0' y2='{h}' stroke='{DOWN}' stroke-width='1.6'/>")
+    if mark is not None:  # 지시(목표)값: 회색 점선 (prd_v7 B1)
+        parts.append(f"<line x1='{sx(mark):.1f}' x2='{sx(mark):.1f}' y1='0' y2='{h}' stroke='#64748B' "
+                     f"stroke-dasharray='2,2' stroke-width='1.2'/>")
     n_out = int((v < lo).sum() if lo is not None else 0) + int((v > hi).sum() if hi is not None else 0)
     tip = f"코일 {len(v):,}개 · 평균 {v.mean():.4g}" + (f" · SPEC 밖 {n_out}개" if lo is not None or hi is not None else "")
     return (f"<svg width='{w}' height='{h}' viewBox='0 0 {w} {h}' role='img' aria-label='{tip}'>"
@@ -494,3 +515,127 @@ def production_monthly(df: pd.DataFrame, period=(None, None)):
                            hovertemplate="%{x}: %{y:,}코일<extra></extra>"))
     fig.update_xaxes(type="category", nticks=12)
     return _layout(fig, "월별 생산량", yaxis_title="코일 수", showlegend=False)
+
+
+# ---------------------------------------------------------------------------
+# prd_v6: 합격/불량 분포 · 두께별/용도별 생산량
+# ---------------------------------------------------------------------------
+PASS = "#3B82F6"
+
+
+def defect_histogram(df: pd.DataFrame, prop: str, spec):
+    """분포를 합격(파랑) / 불량(빨강, SPEC 밖)으로 나눠 쌓는다. SPEC이 없으면 분포 하나."""
+    v = df[prop].dropna() if prop in df else pd.Series(dtype=float)
+    if v.empty:
+        return empty(f"{PROP_SHORT.get(prop, prop)} 분포")
+    lo, hi = spec
+    bad = ((v < lo) if lo is not None else False) | ((v > hi) if hi is not None else False)
+    if not isinstance(bad, pd.Series):
+        bad = pd.Series(False, index=v.index)
+    lo_x, hi_x = v.min(), v.max()
+    size = (hi_x - lo_x) / 30 or 1
+    xbins = dict(start=lo_x, end=hi_x + size, size=size)
+    fig = go.Figure()
+    fig.add_histogram(x=v[~bad], name=f"합격 ({int((~bad).sum()):,})", marker_color=PASS, xbins=xbins,
+                      hovertemplate="%{x}: %{y}코일<extra>합격</extra>")
+    if bad.any():
+        fig.add_histogram(x=v[bad], name=f"불량 ({int(bad.sum()):,})", marker_color=SPEC, xbins=xbins,
+                          hovertemplate="%{x}: %{y}코일<extra>불량</extra>")
+    _spec_lines(fig, spec)
+    return _layout(fig, f"{PROP_SHORT.get(prop, prop)} 분포", barmode="stack", xaxis_title=pl(prop), yaxis_title="코일 수")
+
+
+def production_bars(rows: pd.DataFrame, title: str, horizontal: bool = False):
+    """두께별·용도별 생산량: 막대 = 코일 수 (글자 = 코일 수 · 비율)."""
+    if rows.empty:
+        return empty(title)
+    text = [f"{int(c):,} ({s:.0f}%)" for c, s in zip(rows["coils"], rows["share"])]
+    if horizontal:
+        r = rows.iloc[::-1]
+        fig = go.Figure(go.Bar(y=r["label"], x=r["coils"], orientation="h", marker_color=GROUP, text=text[::-1],
+                               textposition="outside", cliponaxis=False,
+                               hovertemplate="%{y}: %{x:,}코일<extra></extra>"))
+        fig.update_xaxes(range=[0, rows["coils"].max() * 1.3])
+        return _layout(fig, title, xaxis_title="코일 수", showlegend=False)
+    fig = go.Figure(go.Bar(x=rows["label"], y=rows["coils"], marker_color=GROUP, text=text, textposition="outside",
+                           cliponaxis=False, hovertemplate="%{x}: %{y:,}코일<extra></extra>"))
+    fig.update_xaxes(type="category")
+    fig.update_yaxes(range=[0, rows["coils"].max() * 1.2])
+    return _layout(fig, title, yaxis_title="코일 수", showlegend=False)
+
+
+def density_overview(df: pd.DataFrame, prop: str, spec):
+    """강종개요 큰 분포 (prd_v8 G2): 합격(파랑)/불량(빨강) 막대 + 밀도 곡선, 평균선, SPEC 점선."""
+    import numpy as np
+    v = df[prop].dropna() if prop in df else pd.Series(dtype=float)
+    if len(v) < 3:
+        return empty(f"{PROP_SHORT.get(prop, prop)} 분포")
+    fig = defect_histogram(df, prop, spec)
+    lo_x, hi_x = float(v.min()), float(v.max())
+    std = float(v.std()) or 1.0
+    bw = 1.06 * std * len(v) ** (-1 / 5)  # 실버만 대역폭
+    xs = np.linspace(lo_x - 2 * bw, hi_x + 2 * bw, 160)
+    dens = np.exp(-0.5 * ((xs[:, None] - v.to_numpy()[None, :]) / bw) ** 2).sum(axis=1) / (len(v) * bw * np.sqrt(2 * np.pi))
+    size = (hi_x - lo_x) / 30 or 1
+    fig.add_scatter(x=xs, y=dens * len(v) * size, mode="lines", name="밀도", line=dict(color=DOWN, width=2),
+                    hoverinfo="skip")
+    fig.add_vline(x=float(v.mean()), line=dict(color=DOWN, width=2), annotation_text=f"평균 {v.mean():.4g}",
+                  annotation_position="top")
+    return fig
+
+
+def process_timeseries(df: pd.DataFrame, factor: str, period=(None, None), aim=None, label: str | None = None):
+    """공정 조건 시계열 (기본 정보 공정 카드를 누르면 오른쪽에 크게): 일평균 점 + 30일 이동평균 선,
+    전체 평균 ± 1σ 띠, 지시값(엑셀) 점선, 선택 기간 음영."""
+    name = label or factor_label(factor)
+    unit = factor_unit(factor)
+    if factor not in df or df[factor].notna().sum() < 3:
+        return empty(f"{name} 시계열", "이 조건에는 값이 없어요.")
+    daily = df.groupby("prod_date")[factor].mean().dropna()
+    daily.index = pd.to_datetime(daily.index)
+    roll = daily.rolling("30D", min_periods=3).mean()
+    mean, sd = float(df[factor].mean()), float(df[factor].std() or 0)
+    fig = go.Figure()
+    fig.add_hrect(y0=mean - sd, y1=mean + sd, fillcolor=GROUP, opacity=0.08, line_width=0)
+    fig.add_scatter(x=daily.index, y=daily.values, mode="markers", name="일평균", marker=dict(color=BASE, size=4),
+                    hovertemplate="%{x|%Y-%m-%d} %{y:.4g}" + unit + "<extra>일평균</extra>")
+    fig.add_scatter(x=roll.index, y=roll.values, mode="lines", name="30일 이동평균", line=dict(color=DOWN, width=2),
+                    hovertemplate="%{x|%Y-%m-%d} %{y:.4g}" + unit + "<extra>30일 이동평균</extra>")
+    fig.add_hline(y=mean, line=dict(color=GROUP, width=1), annotation_text=f"평균 {mean:.4g}",
+                  annotation_position="bottom right")
+    if aim is not None:
+        fig.add_hline(y=aim, line=dict(color="#64748B", dash="dash", width=1.5), annotation_text=f"지시 {aim:.4g}",
+                      annotation_position="top right")
+    start, end = period
+    if start or end:
+        fig.add_vrect(x0=start or daily.index.min(), x1=end or daily.index.max(), fillcolor=UP, opacity=0.12,
+                      line_width=0, annotation_text="선택 기간", annotation_position="top left")
+    return _layout(fig, f"{name} 시계열", yaxis_title=f"{name} ({unit})" if unit else name)
+
+
+def thickness_bars(tg: pd.DataFrame, prop: str, spec):
+    """두께 그룹별 막대 (재질 큰 그래프 전환): 막대 = 평균, 오차 막대 = ±1σ, 막대 위 = 코일 수 · 불량률,
+    SPEC 점선. 불량률이 가장 높은 구간은 주황."""
+    if tg.empty:
+        return empty(f"두께 그룹별 {PROP_SHORT.get(prop, prop)}", "두께 값이 있는 코일이 없어요.")
+    names = [f"{b[1:]}mm 이하" if b.startswith("~") else f"{b[:-1]}mm 초과" if b.endswith("~") else f"{b}mm"
+             for b in tg["band"]]
+    fail = [None if r != r or r is None else round(100 - r, 1) for r in tg["spec_rate"]]
+    worst = max(range(len(fail)), key=lambda i: -1 if fail[i] is None else fail[i]) if any(f is not None for f in fail) else None
+    colors = [UP if i == worst and fail[i] else GROUP for i in range(len(tg))]
+    # 코일 수·불량률은 x축 글자에 (막대가 좁아도 잘리지 않게)
+    # 세 줄로 가로 표시 (기울어져 아래가 잘리지 않게): 구간 / 코일 수 / 불량률
+    names = [f"<b>{nm}</b><br>{int(n):,}코일<br>불량 {'-' if f is None else f'{f:g}%'}" for nm, n, f in zip(names, tg["n"], fail)]
+    fig = go.Figure(go.Bar(x=names, y=tg["mean"], marker_color=colors,
+                           error_y=dict(type="data", array=tg["std"].fillna(0), color=DOWN, thickness=1.2),
+                           hovertemplate="%{x}<br>평균 %{y:.4g}<extra></extra>"))
+    lo, hi = spec
+    for v, label, pos in ((lo, "스펙 하한", "bottom right"), (hi, "스펙 상한", "top right")):  # 글자는 선 바깥쪽에
+        if v is not None:
+            fig.add_hline(y=v, line=dict(color=SPEC, dash="dash", width=1), annotation_text=f"{label} {v:g}",
+                          annotation_position=pos, annotation_font=dict(size=11, color=SPEC))
+    vals = list(tg["mean"] + tg["std"].fillna(0)) + list(tg["mean"] - tg["std"].fillna(0)) + [v for v in (lo, hi) if v is not None]
+    pad = (max(vals) - min(vals)) * 0.25 or 1
+    fig.update_yaxes(range=[min(vals) - pad * 0.6, max(vals) + pad])  # 아래 여백: 스펙 하한 글자 자리
+    fig.update_xaxes(type="category", tickangle=0, tickfont=dict(size=11), automargin=True)
+    return _layout(fig, f"두께 그룹별 {PROP_SHORT.get(prop, prop)}", yaxis_title=pl(prop), showlegend=False)

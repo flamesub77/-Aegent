@@ -11,7 +11,7 @@ from tools.domain import FACTORS, PROP_DECIMALS, PROP_UNIT, STD_COLUMN, factor_l
 ID_TYPES = {"coil_no": "냉연코일번호", "hot_coil_no": "열연코일번호", "slab_no": "슬라브번호", "heat_no": "히트번호"}
 PROCESS_ORDER = ["제강", "연주", "열연", "산세", "냉연", "소둔", "도금", "조질"]
 MIN_BASE = 30
-MATERIAL_PROPS = ["YS", "TS", "EL", "BH", "rbar", "n_value"]
+MATERIAL_PROPS = ["YS", "TS", "EL", "n_value", "r0", "r45", "r90", "rbar", "BH"]  # 재질 고정 순서 (prd_v6)
 
 
 def _robust(s: pd.Series):
@@ -53,8 +53,21 @@ def find_coils(ids, id_type: str = "coil_no") -> dict:
             .to_dict("records")}
 
 
-def _baseline(df: pd.DataFrame, coil: pd.Series, exclude: set, months: int, same_line: bool, same_thk: bool):
-    """양산 비교 기준. 30개 미만이면 두께 → 라인 → 기간 순으로 조건을 넓힌다."""
+SIMILAR_TOL = {"SS": 10.0, "CT": 20.0}  # "비슷한 SS·CT" 비교 조건: 이 코일 값 ± 허용폭(℃) 기본값
+TOL_CHOICES = {"SS": (5.0, 10.0, 20.0), "CT": (10.0, 20.0, 30.0)}  # 화면 드롭다운 선택지 (± ℃)
+
+
+def _tol(f: str, on) -> float | None:
+    """same_ss·same_ct 값 → 허용폭(℃). True = 기본값, 숫자 = 그 폭, False·None·0 = 안 씀."""
+    if on is True:
+        return SIMILAR_TOL[f]
+    return float(on) if on else None
+
+
+def _baseline(df: pd.DataFrame, coil: pd.Series, exclude: set, months: int, same_line: bool, same_thk: bool,
+              same_plant: bool = True, same_ss: bool | float = False, same_ct: bool | float = False):
+    """양산 비교 기준 = 같은 강종·라인·공장·두께 구간 (prd_v6 P2) + 선택하면 비슷한 SS·CT(± SIMILAR_TOL).
+    30개 미만이면 CT → SS → 두께 → 공장 → 라인 → 기간 순으로 넓힌다."""
     base = df[(df["grade"] == coil["grade"]) & ~df["coil_no"].isin(exclude)]
     if "trial_flag" in base:
         base = base[base["trial_flag"].fillna("N") != "Y"]
@@ -63,6 +76,9 @@ def _baseline(df: pd.DataFrame, coil: pd.Series, exclude: set, months: int, same
     conds = {"강종": coil["grade"], "기간": f"{start} ~ {coil['prod_date']}"}
     use_line = same_line and "line" in base
     use_thk = same_thk and "thk_band" in base
+    use_plant = same_plant and "plant" in base and pd.notna(coil.get("plant"))
+    use_sim = {f: _tol(f, on) if f in base and pd.notna(coil.get(f)) else None
+               for f, on in (("SS", same_ss), ("CT", same_ct))}  # 인자 → 허용폭(℃) 또는 None
     use_period = True
     widened = []
 
@@ -72,16 +88,25 @@ def _baseline(df: pd.DataFrame, coil: pd.Series, exclude: set, months: int, same
             b = b[(b["prod_date"] >= start) & (b["prod_date"] <= coil["prod_date"])]
         if use_line:
             b = b[b["line"] == coil["line"]]
+        if use_plant:
+            b = b[b["plant"] == coil["plant"]]
         if use_thk:
             b = b[b["thk_band"] == coil["thk_band"]]
+        for f, tol in use_sim.items():
+            if tol:
+                b = b[(b[f] - float(coil[f])).abs() <= tol]
         return b
 
     b = pick()
-    for step in ("thk", "line", "period"):
+    for step in ("CT", "SS", "thk", "plant", "line", "period"):
         if len(b) >= MIN_BASE:
             break
-        if step == "thk" and use_thk:
+        if step in use_sim and use_sim[step]:
+            use_sim[step], _ = None, widened.append(f"{step} 범위")
+        elif step == "thk" and use_thk:
             use_thk, _ = False, widened.append("두께 구간")
+        elif step == "plant" and use_plant:
+            use_plant, _ = False, widened.append("공장")
         elif step == "line" and use_line:
             use_line, _ = False, widened.append("라인")
         elif step == "period":
@@ -89,8 +114,14 @@ def _baseline(df: pd.DataFrame, coil: pd.Series, exclude: set, months: int, same
         b = pick()
     if use_line:
         conds["라인"] = coil["line"]
+    if use_plant:
+        conds["공장"] = coil["plant"]
     if use_thk:
         conds["두께 구간"] = coil["thk_band"]
+    for f, t in use_sim.items():
+        if t:
+            v = float(coil[f])
+            conds[f] = f"{v - t:.0f}~{v + t:.0f}℃"
     if not use_period:
         conds["기간"] = "전체"
     return b, conds, widened
@@ -138,8 +169,8 @@ def _factor_rows(coil, base, family, key_prop, key_diff, grade_row) -> list[dict
     return rows
 
 
-def analyze_coil(ids, id_type: str = "coil_no", months: int = 3, same_line: bool = True,
-                 same_thk: bool = True) -> dict:
+def analyze_coil(ids, id_type: str = "coil_no", months: int = 24, same_line: bool = True,
+                 same_thk: bool = True, same_plant: bool = True, same_ss: bool | float = False, same_ct: bool | float = False) -> dict:
     """코일별 재질 위치(양산 대비 z·백분위)와 공정 차이, 여러 코일이면 공통으로 벗어난 인자.
 
     z는 양산 중앙값·MAD(이상치에 강한 표준편차) 기준이다.
@@ -153,7 +184,7 @@ def analyze_coil(ids, id_type: str = "coil_no", months: int = 3, same_line: bool
     exclude = set(targets["coil_no"])
     results = []
     for _, coil in targets.iterrows():
-        base, conds, widened = _baseline(df, coil, exclude, months, same_line, same_thk)
+        base, conds, widened = _baseline(df, coil, exclude, months, same_line, same_thk, same_plant, same_ss, same_ct)
         spec = src.spec(coil["grade"])
         materials = _material_rows(coil, base, spec)
         key = max(materials, key=lambda m: abs(m["z"] or 0), default=None)
@@ -162,7 +193,8 @@ def analyze_coil(ids, id_type: str = "coil_no", months: int = 3, same_line: bool
         grade_row = src.grade(coil["grade"])
         factors = _factor_rows(coil, base, grade_row.get("family"), key_prop, key_diff, grade_row)
         results.append({"coil_no": coil["coil_no"], "grade": coil["grade"], "line": coil["line"],
-                        "prod_date": coil["prod_date"], "thk": coil.get("thk"),
+                        "prod_date": coil["prod_date"], "thk": coil.get("thk"), "plant": coil.get("plant"),
+                        "thk_band": coil.get("thk_band"),
                         "trial": coil.get("trial_flag") == "Y", "n_baseline": len(base),
                         "baseline_ids": base["coil_no"].tolist(),
                         "baseline_conditions": conds, "widened": widened, "key_property": key_prop,

@@ -38,7 +38,23 @@ def model(p: str | None = None) -> str:
 
 
 def has_key(p: str | None = None) -> bool:
-    return config.has_api_key(user_key(p), provider=p or provider())
+    p = p or provider()
+    if env_rejected(p) and not user_key(p):  # 거부된 .env 키는 없는 것으로 (화면에서 새 키를 넣으면 다시 씀)
+        return False
+    return config.has_api_key(user_key(p), provider=p)
+
+
+def env_rejected(p: str | None = None) -> bool:
+    return bool((st.session_state.get("env_bad") or {}).get(p or provider()))
+
+
+def mark_rejected(p: str | None = None):
+    """제공자가 키를 거부(401)했다: 화면 입력 키면 그 키를 '키 오류'로, .env 키면 이번 세션 동안 쓰지 않는다."""
+    p = p or provider()
+    if user_key(p):
+        st.session_state["api_status"][p] = "bad"
+    else:
+        st.session_state.setdefault("env_bad", {})[p] = True
 
 
 def any_key() -> bool:
@@ -50,7 +66,9 @@ def mode() -> str:
 
 
 def effective() -> str:
-    """실제로 쓸 모드: "agent" | "offline"."""
+    """실제로 쓸 모드: "agent" | "offline". 거부된 키(키 오류)만 있으면 오프라인."""
+    if mode() == "offline" or not has_key() or st.session_state["api_status"].get(provider()) == "bad":
+        return "offline"
     return router.effective_mode(mode(), user_key(), provider())
 
 

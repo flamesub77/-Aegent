@@ -1,4 +1,4 @@
-"""compare_groups: 문제 코일/정상 코일 공정인자 비교 (에이전트 도구)."""
+"""compare_groups: 불량 코일/정상 코일 공정인자 비교 (에이전트 도구)."""
 from tools import analysis
 from tools.terms import warning_text
 

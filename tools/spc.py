@@ -13,9 +13,9 @@ import pandas as pd
 DEFAULTS = {"lam": 0.2, "L": 3.0, "k": 0.5, "h": 5.0, "base_months": 6, "persist": 3}
 # 추천 조건 (prd_v5 T4): ⚙ 고급 설정의 프리셋 버튼
 PRESETS = {
-    "기본": DEFAULTS,
-    "작은 변화도 빨리": {"lam": 0.1, "L": 2.7, "k": 0.25, "h": 4.0, "base_months": 3, "persist": 3},
-    "헛경보 줄이기": {"lam": 0.3, "L": 3.0, "k": 0.75, "h": 6.0, "base_months": 12, "persist": 3},
+    "보통(기본)": DEFAULTS,
+    "둔감": {"lam": 0.3, "L": 3.0, "k": 0.75, "h": 6.0, "base_months": 12, "persist": 3},  # 헛경보 줄이기 (산포 큰 강종)
+    "민감": {"lam": 0.1, "L": 2.7, "k": 0.25, "h": 4.0, "base_months": 3, "persist": 3},  # 작은 변화도 빨리 (시생산·신강종)
 }
 
 

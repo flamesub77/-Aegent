@@ -1,4 +1,4 @@
-"""prd_v5: 탭 이름·옛 이름 호환, 소둔온도, 한 줄 해석, 결함 순위·비교, 데이터 편집, AI 제공자 어댑터, AI 보고서."""
+"""prd_v5: 탭 이름·옛 이름 호환, 소둔온도, 한 줄 해석, 결함 순위·비교, AI 제공자 어댑터, AI 보고서. (데이터 편집은 v7에서 삭제)"""
 import json
 import sys
 import types
@@ -11,7 +11,6 @@ import config
 from agent import providers, router
 from tools import analysis as A
 from tools import dashboard_state as ds
-from tools import edits as E
 from tools import narrative as N
 from tools import report_ppt as R
 from tools import spc
@@ -26,11 +25,11 @@ def _sample():
 
 
 def test_views_renamed_and_old_names_accepted():
-    assert ds.VIEWS == ["재질개요", "공정분석", "결함분석", "코일분석", "데이터"]
-    for old, new in [("재질 현황", "재질개요"), ("원인 분석", "공정분석"), ("표면결함", "결함분석"),
+    assert ds.VIEWS == ["강종개요", "공정분석", "결함분석", "코일분석", "데이터"]
+    for old, new in [("재질개요", "강종개요"), ("재질 현황", "강종개요"), ("원인 분석", "공정분석"), ("표면결함", "결함분석"),
                      ("단일 코일 분석", "코일분석"), ("Raw Data", "데이터")]:
         assert ds.apply_update(ds.defaults(), {"view": old})[0]["view"] == new
-    assert ds.defaults()["view"] == "재질개요"
+    assert ds.defaults()["view"] == "강종개요"
 
 
 def test_annealing_temp_label_and_alias():
@@ -77,37 +76,8 @@ def test_defect_pareto_and_compare():
 
 
 def test_spc_presets():
-    assert spc.PRESETS["기본"] == spc.DEFAULTS
-    assert spc.PRESETS["작은 변화도 빨리"]["lam"] == 0.1 and spc.PRESETS["헛경보 줄이기"]["base_months"] == 12
-
-
-def test_data_edits_exclude_change_undo_and_source():
-    src = get_source()
-    base = A.filter_coils("HSLA590C").head(50).reset_index(drop=True)
-    shown = E.apply(base, E.empty(), drop_excluded=False)[["제외", "coil_no", "YS"]]
-    edited = shown.copy()
-    edited.loc[0, "제외"] = True
-    edited.loc[1, "YS"] = 999.0
-    edited.loc[1, "coil_no"] = "HACK"  # 번호 열은 잠금
-    d = E.diff(shown, edited, E.empty(), original=base)
-    c0, c1 = str(base.loc[0, "coil_no"]), str(base.loc[1, "coil_no"])
-    assert c0 in d["excluded"] and d["changes"][(c1, "YS")]["new"] == 999.0
-    assert d["changes"][(c1, "YS")]["old"] == base.loc[1, "YS"] and not any(k[1] == "coil_no" for k in d["changes"])
-    assert E.summary(d) == "제외 1행, 변경 1칸" and len(E.log_rows(d)) == 2
-    edited.loc[1, "coil_no"] = shown.loc[1, "coil_no"]
-    back = E.diff(edited, edited.assign(YS=shown["YS"]), d, original=base)  # 원래 값으로 되돌리면 기록에서 빠진다
-    assert (c1, "YS") not in back["changes"]
-    new = E.edited_source(src, d)
-    assert len(new.coils) == len(src.coils) - 1 and "수정 2건" in new.name and new.edit_note == "제외 1행, 변경 1칸"
-    assert new.coils.set_index("coil_no").at[c1, "YS"] == 999.0
-    assert len(src.coils) == len(get_source().coils)  # 원본은 그대로
-
-
-def test_outlier_mask():
-    df = pd.DataFrame({"coil_no": list("abcdefghij"), "TS": [600] * 9 + [5000]})
-    m = E.outlier_mask(df, "TS", k=2.5, spec=(590, None))
-    assert m.tolist() == [False] * 9 + [True]
-    assert E.outlier_mask(df.assign(TS=[600] * 9 + [200]), "TS", k=10, spec=(590, None)).iloc[-1]  # SPEC 50% 밖
+    assert spc.PRESETS["보통(기본)"] == spc.DEFAULTS
+    assert spc.PRESETS["민감"]["lam"] == 0.1 and spc.PRESETS["둔감"]["base_months"] == 12
 
 
 def test_router_modes_and_missing_packages(monkeypatch):

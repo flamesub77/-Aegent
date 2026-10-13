@@ -202,17 +202,22 @@ def _mechanism(family, factor: str, prop: str, factor_diff, prop_shift):
 
 
 def comparison_groups(df, grade, prop, start=None, end=None, base_start=None, base_end=None, side="auto",
-                      sigma: float = 1.0):
+                      sigma: float = 1.0, basis: str = "sigma"):
     """비교할 두 그룹을 정한다. 반환: (mode, side, group, ref).
 
     mode="period": 기간이 주어지고 나머지 기간 코일이 충분하면 이 기간 코일 vs 나머지 기간 코일
-    mode="outlier": 아니면 문제 코일(스펙 또는 평균±sigma·σ 밖, 기본 1.0σ) vs 정상 코일. 화면 용어는 tools/terms.py
+    mode="outlier": 아니면 불량 코일(스펙 또는 평균±sigma·σ 밖, 기본 1.0σ) vs 정상 코일. 화면 용어는 tools/terms.py
+    basis="spec"(prd_v6): 불량 코일 = SPEC 밖(불량) 코일만. SPEC이 없는 재질이면 σ 기준으로 돌아간다.
     """
     target, baseline = split_period(df, start, end, base_start, base_end)
     if (start or end) and len(baseline) >= MIN_N:
         return "period", None, target, baseline
     lo, hi = spec(grade).get(prop, (None, None))
-    mean, std = df[prop].mean(), df[prop].std() * float(sigma)
+    if basis == "spec" and (lo is not None or hi is not None):
+        std = float("inf")  # 스펙 이탈만 불량 코일
+        mean = df[prop].mean()
+    else:
+        mean, std = df[prop].mean(), df[prop].std() * float(sigma)
     low_mask = (df[prop] < mean - std) | ((df[prop] < lo) if lo is not None else False)
     high_mask = (df[prop] > mean + std) | ((df[prop] > hi) if hi is not None else False)
     if side == "auto":  # 스펙 이탈이 더 많은 쪽, 같으면 1σ 이탈이 더 많은 쪽
@@ -222,16 +227,32 @@ def comparison_groups(df, grade, prop, start=None, end=None, base_start=None, ba
             n_lo, n_hi = int(low_mask.sum()), int(high_mask.sum())
         side = "low" if n_lo >= n_hi else "high"
     mask = low_mask if side == "low" else high_mask if side == "high" else (low_mask | high_mask)
+    if basis == "spec" and mask.sum() < MIN_SPEC_FAIL:  # 불량 코일이 너무 적으면 σ 기준으로 (prd_v6)
+        return comparison_groups(df, grade, prop, start, end, base_start, base_end, side, sigma, "sigma")
     return "outlier", side, df[mask], df[~mask]
+
+
+MIN_SPEC_FAIL = 5
+
+
+def basis_fallback(df, grade, prop, basis: str) -> str | None:
+    """스펙 불량 기준인데 불량 코일이 적어 σ 기준으로 바꿨으면 안내 문장."""
+    if basis != "spec":
+        return None
+    lo, hi = spec(grade).get(prop, (None, None))
+    if lo is None and hi is None:
+        return "이 재질은 SPEC이 없어 σ 기준으로 비교했어요."
+    n = int(spec_fail_mask(df[prop], lo, hi).sum())
+    return f"스펙 불량 코일이 {n}개뿐이라 σ 기준으로 비교했어요." if n < MIN_SPEC_FAIL else None
 
 
 def compare(grade, prop, line=None, start=None, end=None, base_start=None, base_end=None,
             side="auto", thk_min=None, thk_max=None, coil_pos=None, top_n=10, thk_band=None, where=None,
-            model: str = "effect", sigma: float = 1.0) -> dict:
-    """문제 코일과 정상 코일의 인자를 비교해 원인 가능성 순위를 매긴다. model: tools/ranking.MODELS."""
+            model: str = "effect", sigma: float = 1.0, basis: str = "sigma") -> dict:
+    """불량 코일과 정상 코일의 인자를 비교해 원인 가능성 순위를 매긴다. model: tools/ranking.MODELS."""
     df = filter_coils(grade, line, thk_min, thk_max, coil_pos, thk_band=thk_band, where=where)
     family = grade_info(grade)["family"]
-    mode, side, group, ref = comparison_groups(df, grade, prop, start, end, base_start, base_end, side, sigma)
+    mode, side, group, ref = comparison_groups(df, grade, prop, start, end, base_start, base_end, side, sigma, basis)
 
     prop_shift = group[prop].mean() - ref[prop].mean() if len(group) and len(ref) else None
     both = pd.concat([group, ref])
@@ -463,3 +484,112 @@ def defect_compare(defect_type, line=None, start=None, end=None, **sub) -> pd.Da
     g["count"] = g["count"].astype(int)
     g["rate"] = (100 * g["count"] / g["n"].clip(lower=1)).round(2)
     return g.sort_values("rate", ascending=False).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# prd_v6: 스펙 불량률 · 두께별/용도별 생산량 · 강종 기본 정보
+# ---------------------------------------------------------------------------
+def spec_fail_mask(s: pd.Series, lo=None, hi=None) -> pd.Series:
+    """SPEC 밖(불량) 여부. 값이 없거나 SPEC이 없으면 False."""
+    v = pd.to_numeric(s, errors="coerce")
+    out = pd.Series(False, index=s.index)
+    if lo is not None:
+        out |= v < lo
+    if hi is not None:
+        out |= v > hi
+    return out.fillna(False)
+
+
+def defect_rate(s: pd.Series, lo=None, hi=None):
+    """스펙 불량률(%) · 불량 수 · 값 있는 수. SPEC이 없으면 (None, 0, n)."""
+    n = int(s.notna().sum())
+    if (lo is None and hi is None) or not n:
+        return None, 0, n
+    bad = int(spec_fail_mask(s, lo, hi).sum())
+    return round(100 * bad / n, 2), bad, n
+
+
+def production_by(df: pd.DataFrame, col: str, top: int | None = None, names: dict | None = None) -> pd.DataFrame:
+    """열 값별 생산량: key, label, coils, tons, share(%). top을 주면 나머지는 "기타"."""
+    if df.empty or col not in df:
+        return pd.DataFrame(columns=["key", "label", "coils", "tons", "share"])
+    tons = df["weight"] if "weight" in df else pd.Series(np.nan, index=df.index)
+    g = df.assign(_w=tons, _k=df[col].astype(str)).groupby("_k").agg(coils=("coil_no", "size"), tons=("_w", "sum"))
+    if col == "thk_band":
+        order = [b for *_, b in THK_GROUPS]
+        g = g.reindex([b for b in order if b in g.index])
+    else:
+        g = g.sort_values("coils", ascending=False)
+        if top and len(g) > top:
+            rest = g.iloc[top:].sum()
+            g = pd.concat([g.iloc[:top], pd.DataFrame([rest], index=["기타"])])
+    g["share"] = (100 * g["coils"] / max(g["coils"].sum(), 1)).round(1)
+    out = g.reset_index().rename(columns={"index": "key", "_k": "key"})
+    out["label"] = [(f"{k} {names[k]}" if names and k in names else k) for k in out["key"]]
+    return out[["key", "label", "coils", "tons", "share"]]
+
+
+EXCEL_SPEC = ["YS", "TS", "EL", "n_value", "BH"]  # 회사 양식 냉연 블록 SPEC 열 (tools/pds.SPEC_PROPS)
+
+
+def excel_spec(df: pd.DataFrame) -> dict:
+    """엑셀 SPEC 열(spec_{재질}_lo/hi)에서 바로 읽은 SPEC. 가장 많이 쓰인 값."""
+    out = {}
+    for p in EXCEL_SPEC:
+        lo = df[f"spec_{p}_lo"].dropna() if f"spec_{p}_lo" in df else pd.Series(dtype=float)
+        hi = df[f"spec_{p}_hi"].dropna() if f"spec_{p}_hi" in df else pd.Series(dtype=float)
+        if len(lo) or len(hi):
+            out[p] = (float(lo.mode().iloc[0]) if len(lo) else None, float(hi.mode().iloc[0]) if len(hi) else None)
+    return out
+
+
+def grade_overview(df: pd.DataFrame, grade: str, use_names: dict | None = None) -> list[tuple[str, str]]:
+    """강종 기본 정보 표 (prd_v6 M1 → prd_v7 B2): 엑셀(회사 양식) 열 값만 쓴다. 계열·이름·용도 이름 같은 보조 표는 쓰지 않는다."""
+    rows = [("냉연규격", grade)]
+    if df.empty:
+        return rows + [("생산", "조건에 맞는 코일 없음")]
+    sp = excel_spec(df)
+    specs = [f"{PROP_SHORT_V6.get(p, p)} {'' if lo is None else f'{lo:g}'}~{'' if hi is None else f'{hi:g}'}"
+             for p, (lo, hi) in sp.items()]
+    rows.append(("SPEC", " · ".join(specs) or "엑셀에 SPEC 값 없음"))
+    tons = df["weight"].sum() if "weight" in df else None
+    rows.append(("생산", f"{df['prod_date'].min()} ~ {df['prod_date'].max()} · {len(df):,}코일"
+                 + (f" · {tons:,.0f}톤" if tons else "")))
+    for col, name in (("line", "라인"), ("plant", "공장")):
+        if col in df and df[col].notna().any():
+            vc = df[col].value_counts(normalize=True).mul(100)
+            rows.append((name, " · ".join(f"{k} {v:.0f}%" for k, v in vc.items())))
+    if "thk" in df and df["thk"].notna().any():
+        main = df["thk_band"].value_counts().idxmax() if "thk_band" in df else None
+        w = f" · 폭 {df['width'].min():g}~{df['width'].max():g}mm" if "width" in df and df["width"].notna().any() else ""
+        rows.append(("두께 · 폭", f"{df['thk'].min():g}~{df['thk'].max():g}mm" + (f" (주력 {main})" if main else "") + w))
+    for col, name in (("spec_roll", "압연규격약호"), ("spec_fin", "정정규격약호"), ("aim", "출강목표"), ("use_code", "용도코드")):
+        if col in df and df[col].notna().any():
+            vc = df[col].value_counts()
+            rows.append((name, ", ".join(f"{k} ({v:,})" for k, v in vc.head(4).items()) + (" 외" if len(vc) > 4 else "")))
+    return rows
+
+
+PROC_FACTORS = ["SRT", "FDT", "CT", "RED", "SS", "RCS", "OA", "SPM", "GA_temp"]  # 기본 정보 공정 조건 (공정 순서)
+PROC_STAGE = {"SRT": "열연", "FDT": "열연", "CT": "열연", "RED": "냉연", "SS": "소둔", "RCS": "소둔", "OA": "소둔",
+              "SPM": "조질·도금", "GA_temp": "조질·도금"}
+PROC_ALWAYS = {"RCS", "OA"}  # 값이 없어도 카드를 보여줄 인자 (요청: RCS·OAS 카드). OA = 엑셀 "OAS" 열
+
+
+def process_overview(df: pd.DataFrame) -> list[dict]:
+    """공정 조건 요약 (prd_v7 B1): 값이 있는 인자만. factor, mean, std, min, max, n, aim(엑셀 지시값 열이 있으면)."""
+    out = []
+    for f in PROC_FACTORS:
+        if f not in df or df[f].notna().sum() < 3:
+            if f in PROC_ALWAYS:
+                out.append({"factor": f, "stage": PROC_STAGE[f], "n": 0})
+            continue
+        v = df[f].dropna()
+        aim_col = f"{f}_aim"
+        aim = float(df[aim_col].dropna().mean()) if aim_col in df and df[aim_col].notna().any() else None
+        out.append({"factor": f, "stage": PROC_STAGE[f], "mean": float(v.mean()), "std": float(v.std()), "min": float(v.min()),
+                    "max": float(v.max()), "n": int(len(v)), "aim": aim})
+    return out
+
+
+PROP_SHORT_V6 = {"YS": "YP", "TS": "TS", "EL": "EL", "BH": "BH", "rbar": "r̄", "n_value": "n"}

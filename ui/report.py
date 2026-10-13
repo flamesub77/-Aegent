@@ -17,6 +17,10 @@ def _ai_text(chosen: list[str], ctx: dict) -> tuple[dict | None, str | None]:
     try:
         text = providers.complete(ai.provider(), ai.user_key(), R.AI_SYSTEM, R.ai_prompt(chosen, ctx), ai.model())
     except providers.ProviderError as e:
+        if providers.is_auth_error(str(e)):
+            ai.mark_rejected()
+            return None, (f"{e} 규칙 문장으로 만들었어요. 키가 만료·폐기된 것 같아요. 오른쪽 위 🔑에서 새 키를 넣으면 "
+                          "AI가 문장을 써요.")
         return None, f"{e} 규칙 문장으로 만들었어요."
     parsed = R.parse_ai(text)
     return parsed, None if parsed else "AI 응답 형식이 맞지 않아 규칙 문장으로 만들었어요."
@@ -25,7 +29,7 @@ def _ai_text(chosen: list[str], ctx: dict) -> tuple[dict | None, str | None]:
 @st.dialog("🤖 AI 보고서 (PPT)", width="large")
 def dialog(ctx: dict):
     who = f"AI({ai.label()})가 해석 문장을 써요" if ai.effective() == "agent" else "오프라인이라 규칙 문장으로 써요"
-    st.caption(f"`{R.TEMPLATE.name}` 양식으로 2~3장(한 장에 그래프 2개). 지금 화면 조건으로 계산하고, {who}.")
+    st.caption(f"`{R.TEMPLATE.name}` 양식으로 한 장에 그래프 2개씩, 고른 만큼 만들어요. 지금 화면 조건으로 계산하고, {who}.")
     st.markdown("**① 넣을 항목**")
     avail = R.available(ctx)
     cols = st.columns(2)

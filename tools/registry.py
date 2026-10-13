@@ -23,7 +23,7 @@ def _fn(name, description, properties, required=()):
                            "additionalProperties": False}}
 
 
-def analyze_coil(ids, id_type="coil_no", months=3):
+def analyze_coil(ids, id_type="coil_no", months=24):
     """코일 단건 분석 (에이전트용 요약)."""
     return coil_lookup.compact(coil_lookup.analyze_coil(ids, id_type, months))
 
@@ -48,7 +48,7 @@ def tool_schemas() -> list[dict]:
                         "description": f"원인 분석 산점도·추이에 쓸 인자 코드. 자동 = 1순위. {FACTOR_GUIDE}"},
              "defect": {"type": "string", "enum": list(DEFECTS)},
              "side": {"type": "string", "enum": list(ds.SIDES),
-                      "description": "문제 코일 기준: low=낮게 나온 코일, high=높게 나온 코일"},
+                      "description": "불량 코일 기준: low=낮게 나온 코일, high=높게 나온 코일"},
              "view": {"type": "string", "enum": ds.VIEWS, "description": "보여줄 화면"},
              "coil_ids": {"type": "string", "description": "단일 코일 분석 대상 번호 (여러 개면 쉼표)"},
              "id_type": ids,
@@ -61,7 +61,7 @@ def tool_schemas() -> list[dict]:
              "aims": {"type": "array", "items": {"type": "string"}, "description": "출강목표 필터"},
              "props": {"type": "array", "items": props, "description": "화면에 보여줄 재질 (빈 목록 = TS)"},
              "sigma": {"type": "number", "minimum": 0.5, "maximum": 3.0,
-                       "description": "전체 기간 비교의 문제 코일 기준 (평균 ± sigma·σ, 기본 1.0)"},
+                       "description": "전체 기간 비교의 불량 코일 기준 (평균 ± sigma·σ, 기본 1.0)"},
              "spec_cols": {"type": "array", "items": {"type": "string", "enum": list(ds.SPEC_COLS)},
                            "description": "규격약호 기준 (압연 spec_roll, 정정 spec_fin, 둘 다 가능)"},
              "defect_scope": {"type": "string", "enum": list(ds.DEFECT_SCOPES),
@@ -81,14 +81,14 @@ def tool_schemas() -> list[dict]:
              "baseline_start": date, "baseline_end": date,
              "properties": {"type": "array", "items": props}}, ["grade"]),
         _fn("compare_groups",
-            "두 그룹(기간이 있으면 이 기간 vs 나머지 기간, 없으면 문제 코일 vs 정상 코일)의 성분·공정인자를 비교해 "
+            "두 그룹(기간이 있으면 이 기간 vs 나머지 기간, 없으면 불량 코일 vs 정상 코일)의 성분·공정인자를 비교해 "
             "차이 크기(효과크기) 순위, 표준조건 대비, 지식베이스 메커니즘 일치 여부, 비교 조건 차이(두께·라인·시편 위치)를 반환한다.",
             {"grade": grade, "target_property": props, "line": line,
              "start_date": date, "end_date": date, "baseline_start": date, "baseline_end": date,
              "side": {"type": "string", "enum": list(ds.SIDES)},
              "model": {"type": "string", "enum": list(MODELS), "description": "원인 순위 모델. 없으면 effect(차이 크기)"},
              "sigma": {"type": "number", "minimum": 0.5, "maximum": 3.0,
-                       "description": "전체 기간일 때 문제 코일 기준 σ 수준 (기본 1.0). 대시보드 상태의 sigma를 넘기세요"}},
+                       "description": "전체 기간일 때 불량 코일 기준 σ 수준 (기본 1.0). 대시보드 상태의 sigma를 넘기세요"}},
             ["grade", "target_property"]),
         _fn("trace_defect", "표면결함 발생률을 기간별로 비교하고 원인 인자를 순위화한다.",
             {"defect_type": {"type": "string", "enum": list(DEFECTS)}, "grade": grade, "line": line,
@@ -97,7 +97,7 @@ def tool_schemas() -> list[dict]:
             "특정 코일(시생산·클레임)을 같은 강종·라인·두께의 양산 실적과 비교한다. 슬라브·열연코일·히트번호면 딸린 "
             "냉연코일을 모두 분석. 재질별 양산 대비 z·백분위, 공정인자별 차이(z, 표준조건 대비, 메커니즘), 공통 원인을 반환한다.",
             {"ids": {"type": "string", "description": "번호 (여러 개면 쉼표)"}, "id_type": ids,
-             "months": {"type": "integer", "minimum": 1, "maximum": 12, "description": "양산 비교 기간(개월)"}},
+             "months": {"type": "integer", "minimum": 1, "maximum": 60, "description": "양산 비교 기간(개월, 기본 24)"}},
             ["ids"]),
         _fn("search_knowledge",
             "냉연강판 지식베이스(공정, 용어, 강종별 강화기구, r값·n값, 결함 원인, 분석 절차)를 검색한다. "
